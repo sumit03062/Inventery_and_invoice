@@ -1,0 +1,38 @@
+# Django & REST Framework
+Django==5.0.4
+djangorestframework==3.15.1
+djangorestframework-simplejwt==5.5.1
+
+# Database
+mysqlclient==2.2.4
+django-mysql==4.14.0
+
+# PDF Generation
+WeasyPrint==61.2
+pypdf==4.2.0
+
+# CORS
+django-cors-headers==4.4.0
+
+# Environment Variables
+python-decouple==3.8
+
+# Testing
+pytest==8.2.0
+pytest-django==4.8.0
+pytest-cov==5.0.0
+factory-boy==3.3.1
+
+# Code Quality
+black==24.4.2
+flake8==7.0.0
+isort==5.13.2
+
+# Caching & Task Queue
+redis==5.0.4
+celery==5.4.0
+
+# Utils
+python-dateutil==2.9.0.post0
+requests==2.32.3
+Pillow==10.3.0
