@@ -40,7 +40,7 @@ docker-compose up -d
 - Sales reporting
 - Admin dashboard
 - Role-based access control
-
+`
 ## API Documentation
 See `/api/` endpoint documentation
 
