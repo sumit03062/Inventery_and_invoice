@@ -4,7 +4,7 @@ export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
-}): JSX.Element {
+}): React.ReactNode {
   const currentYear = new Date().getFullYear();
 
   return (

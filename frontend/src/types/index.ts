@@ -17,6 +17,16 @@ export interface TokenResponse {
   refresh: string;
 }
 
+// Customer Types
+export interface Customer {
+  id: number;
+  name: string;
+  phone: string;
+  email: string;
+  address: string;
+  created_at: string;
+}
+
 // Product Types
 export interface Product {
   id: number;
@@ -39,7 +49,7 @@ export interface CreateProductInput {
   low_stock_threshold: number;
 }
 
-export interface UpdateProductInput extends CreateProductInput {}
+export type UpdateProductInput = CreateProductInput;
 
 // Invoice Types
 export interface InvoiceItem {
@@ -58,6 +68,7 @@ export interface Invoice {
   grand_total: number;
   created_at: string;
   updated_at: string;
+  status?: 'ACTIVE' | 'VOID';
   items?: InvoiceItem[];
 }
 

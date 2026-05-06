@@ -7,7 +7,7 @@ interface ErrorProps {
   reset: () => void;
 }
 
-export default function Error({ error, reset }: ErrorProps): JSX.Element {
+export default function Error({ error, reset }: ErrorProps): React.ReactNode {
   useEffect(() => {
     console.error('Application error:', error);
   }, [error]);

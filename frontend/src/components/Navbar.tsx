@@ -16,7 +16,9 @@ const Navbar = () => {
     { label: 'Dashboard', path: '/dashboard', icon: '📊' },
     { label: 'Invoices', path: '/invoices', icon: '📄' },
     { label: 'Products', path: '/products', icon: '📦' },
+    { label: 'Customers', path: '/customers', icon: '👥' },
     { label: 'Reports', path: '/reports', icon: '📈' },
+    { label: 'Settings', path: '/settings', icon: '⚙️' },
   ];
 
   const isActive = useCallback((path: string): boolean => pathname === path, [pathname]);

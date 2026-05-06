@@ -1,360 +1,198 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { api } from '@/lib/api';
 import { DailySalesStats } from '@/types';
+import { useQuery } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+} from 'recharts';
 
-export default function ReportsPage(): JSX.Element {
-  const [selectedDate, setSelectedDate] = useState(
-    new Date().toISOString().split('T')[0]
-  );
-  const [stats, setStats] = useState<DailySalesStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+interface TrendData {
+  label: string;
+  total: number;
+  count: number;
+}
 
-  useEffect(() => {
-    fetchDailyStats();
-  }, [selectedDate]);
+export default function ReportsPage(): React.ReactNode {
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [period, setPeriod] = useState<'daily' | 'monthly'>('daily');
+  const [statsPeriod, setStatsPeriod] = useState<'daily' | 'monthly' | 'yearly'>('daily');
 
-  const fetchDailyStats = async (): Promise<void> => {
-    setLoading(true);
-    setError(null);
+  // 1. Data Fetching with useQuery
+  const { data: stats, isLoading: loadingStats } = useQuery({
+    queryKey: ['reports', 'stats', selectedDate, statsPeriod],
+    queryFn: async () => {
+      const res = await api.get<DailySalesStats>(`/reports/daily-sales/?date=${selectedDate}&period=${statsPeriod}`);
+      return res.data;
+    },
+  });
+
+  const { data: trends = [], isLoading: loadingTrends } = useQuery({
+    queryKey: ['reports', 'trends', period],
+    queryFn: async () => {
+      const res = await api.get<{ results: TrendData[] }>(`/reports/sales-trend/?period=${period}`);
+      return res.data.results || [];
+    },
+  });
+
+  const handleExportCSV = async () => {
+    const toastId = toast.loading('Generating CSV...');
     try {
-      const response = await api.get<DailySalesStats>(
-        `/reports/daily-sales/?date=${selectedDate}`
-      );
-      setStats(response.data);
+      const response = await api.get('/reports/export-csv/', { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `sales_export_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode?.removeChild(link);
+      toast.success('Export complete!', { id: toastId });
     } catch (err) {
-      console.error('Failed to fetch stats:', err);
-      setError('Failed to load report data');
-      setStats(null);
-    } finally {
-      setLoading(false);
+      toast.error('Export failed', { id: toastId });
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="spinner mx-auto mb-4"></div>
-          <h3 className="text-lg font-semibold text-gray-900">Loading Report</h3>
-        </div>
-      </div>
-    );
-  }
-
-  const dateObj = new Date(selectedDate);
-  const formattedDate = dateObj.toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
+  if (loadingStats && !stats) return <div className="flex items-center justify-center min-h-screen"><div className="spinner"></div></div>;
 
   return (
-    <div className="py-6 px-4 sm:px-6 lg:px-8">
+    <div className="py-6 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 mb-8">
         <div>
-          <h1 className="text-4xl font-bold text-gray-900">Sales Reports</h1>
-          <p className="text-gray-600 mt-2">Daily sales analytics and insights</p>
+          <h1 className="text-4xl font-bold text-gray-900">Analytics</h1>
+          <p className="text-gray-600 mt-2">Data-driven insights for your shop</p>
         </div>
 
-        <div className="flex items-center gap-2 bg-white p-3 rounded-lg border border-gray-300">
-          <label htmlFor="date" className="text-gray-700 font-medium whitespace-nowrap">
-            📅 Select Date:
-          </label>
-          <input
-            id="date"
-            type="date"
-            value={selectedDate}
-            onChange={(e) => setSelectedDate(e.target.value)}
-            className="input-field max-w-max p-2 border-0 focus:ring-0"
-          />
-        </div>
-      </div>
-
-      {/* Date Display */}
-      <div className="mb-8 p-4 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-lg border border-blue-200">
-        <p className="text-lg text-gray-700">
-          📊 Showing data for{' '}
-          <span className="font-bold text-primary">{formattedDate}</span>
-        </p>
-      </div>
-
-      {/* Error Message */}
-      {error && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center">
-          <svg className="w-5 h-5 text-red-600 mr-3" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-          </svg>
-          <p className="text-red-700 font-medium flex-1">{error}</p>
-          <button onClick={fetchDailyStats} className="text-red-700 underline font-medium">
-            Retry
+        <div className="flex flex-wrap gap-3">
+          <button onClick={handleExportCSV} className="btn-secondary flex items-center gap-2">
+            📥 Export CSV
           </button>
+          <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-gray-300">
+            <select value={statsPeriod} onChange={(e) => setStatsPeriod(e.target.value as any)} className="border-0 focus:ring-0 text-sm font-semibold bg-transparent">
+              <option value="daily">Day</option>
+              <option value="monthly">Month</option>
+              <option value="yearly">Year</option>
+            </select>
+            <div className="w-[1px] h-4 bg-gray-300 mx-1"></div>
+            <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="border-0 focus:ring-0 text-sm" />
+          </div>
         </div>
-      )}
+      </div>
 
-      {/* Statistics Grid */}
-      {stats ? (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
-            {/* Total Invoices Card */}
-            <div className="card">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-gray-600 text-sm font-medium">Total Invoices</p>
-                  <p className="text-4xl font-bold text-gray-900 mt-2">
-                    {stats.invoice_count || 0}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">Invoices created</p>
-                </div>
-                <div className="p-4 bg-blue-100 rounded-lg">
-                  <svg
-                    className="w-8 h-8 text-blue-600"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                    />
-                  </svg>
-                </div>
-              </div>
-            </div>
+      {/* Stats */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <StatCard title="Invoices" value={stats?.invoice_count || 0} icon="📄" color="blue" />
+        <StatCard title="Revenue" value={`₹${stats?.total_sales || 0}`} icon="💰" color="green" />
+        <StatCard title="GST" value={`₹${stats?.gst_collected || 0}`} icon="🏛️" color="purple" />
+        <StatCard title="Average" value={`₹${stats?.avg_invoice || 0}`} icon="📊" color="orange" />
+      </div>
 
-            {/* Subtotal Card */}
-            <div className="card">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-gray-600 text-sm font-medium">Subtotal</p>
-                  <p className="text-4xl font-bold text-gray-900 mt-2">
-                    ₹{parseFloat(String(stats.subtotal || 0)).toFixed(0)}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">Before tax</p>
-                </div>
-                <div className="p-4 bg-green-100 rounded-lg">
-                  <svg
-                    className="w-8 h-8 text-green-600"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                  </svg>
-                </div>
-              </div>
-            </div>
-
-            {/* GST Collected Card */}
-            <div className="card">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-gray-600 text-sm font-medium">GST Collected</p>
-                  <p className="text-4xl font-bold text-gray-900 mt-2">
-                    ₹{parseFloat(String(stats.gst_collected || 0)).toFixed(0)}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">Tax collected</p>
-                </div>
-                <div className="p-4 bg-purple-100 rounded-lg">
-                  <svg
-                    className="w-8 h-8 text-purple-600"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M13 10V3L4 14h7v7l9-11h-7z"
-                    />
-                  </svg>
-                </div>
-              </div>
-            </div>
-
-            {/* Total Sales Card - Featured */}
-            <div className="card border-2 border-primary bg-gradient-to-br from-primary/5 to-transparent md:col-span-2 lg:col-span-1">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-gray-600 text-sm font-medium">Total Sales</p>
-                  <p className="text-4xl font-bold text-primary mt-2">
-                    ₹{parseFloat(String(stats.total_sales || 0)).toFixed(0)}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">With GST included</p>
-                </div>
-                <div className="p-4 bg-primary text-white rounded-lg shadow-lg">
-                  <svg
-                    className="w-8 h-8"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M13 7h8m0 0v8m0-8L5.257 19.393A2 2 0 005 18.21V5a2 2 0 012-2h10a2 2 0 012 2z"
-                    />
-                  </svg>
-                </div>
-              </div>
-            </div>
-
-            {/* Average Invoice Card */}
-            <div className="card">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-gray-600 text-sm font-medium">Average Invoice</p>
-                  <p className="text-4xl font-bold text-gray-900 mt-2">
-                    ₹{parseFloat(String(stats.avg_invoice || 0)).toFixed(0)}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">Per invoice</p>
-                </div>
-                <div className="p-4 bg-orange-100 rounded-lg">
-                  <svg
-                    className="w-8 h-8 text-orange-600"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-                    />
-                  </svg>
-                </div>
-              </div>
-            </div>
-
-            {/* Highest Invoice Card */}
-            <div className="card">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-gray-600 text-sm font-medium">Highest Invoice</p>
-                  <p className="text-4xl font-bold text-gray-900 mt-2">
-                    ₹{parseFloat(String(stats.max_invoice || 0)).toFixed(0)}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">Maximum value</p>
-                </div>
-                <div className="p-4 bg-red-100 rounded-lg">
-                  <svg
-                    className="w-8 h-8 text-red-600"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                  </svg>
-                </div>
-              </div>
+      {/* Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+        <div className="lg:col-span-2 card p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-bold">Sales Performance</h2>
+            <div className="flex gap-2 bg-gray-100 p-1 rounded-lg">
+              {['daily', 'monthly'].map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setPeriod(p as any)}
+                  className={`px-4 py-1 rounded-md text-xs font-bold transition-all ${period === p ? 'bg-white shadow text-primary' : 'text-gray-500'}`}
+                >
+                  {p === 'daily' ? '30 Days' : '12 Months'}
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* Detailed Summary Table */}
-          <div className="card">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center">
-              <svg className="w-6 h-6 mr-2 text-primary" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z" />
-              </svg>
-              Detailed Summary
-            </h2>
-
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <tbody>
-                  <tr className="border-b border-gray-200">
-                    <td className="table-cell text-gray-600 font-medium">Total Invoices Created</td>
-                    <td className="table-cell text-right font-semibold text-gray-900">
-                      {stats.invoice_count || 0}
-                    </td>
-                  </tr>
-                  <tr className="border-b border-gray-200 bg-gray-50">
-                    <td className="table-cell text-gray-600 font-medium">Subtotal (before GST)</td>
-                    <td className="table-cell text-right font-semibold text-gray-900">
-                      ₹{parseFloat(String(stats.subtotal || 0)).toFixed(2)}
-                    </td>
-                  </tr>
-                  <tr className="border-b border-gray-200">
-                    <td className="table-cell text-gray-600 font-medium">GST Collected (Tax)</td>
-                    <td className="table-cell text-right font-semibold text-gray-900">
-                      ₹{parseFloat(String(stats.gst_collected || 0)).toFixed(2)}
-                    </td>
-                  </tr>
-                  <tr className="bg-primary/5 border-2 border-primary">
-                    <td className="table-cell text-gray-900 font-bold">Grand Total (with GST)</td>
-                    <td className="table-cell text-right font-bold text-primary text-lg">
-                      ₹{parseFloat(String(stats.total_sales || 0)).toFixed(2)}
-                    </td>
-                  </tr>
-                  <tr className="border-b border-gray-200">
-                    <td className="table-cell text-gray-600 font-medium">Average Invoice Value</td>
-                    <td className="table-cell text-right font-semibold text-gray-900">
-                      ₹{parseFloat(String(stats.avg_invoice || 0)).toFixed(2)}
-                    </td>
-                  </tr>
-                  <tr>
-                    <td className="table-cell text-gray-600 font-medium">Highest Invoice Value</td>
-                    <td className="table-cell text-right font-semibold text-gray-900">
-                      ₹{parseFloat(String(stats.max_invoice || 0)).toFixed(2)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            {/* Summary Stats at Bottom */}
-            <div className="mt-6 p-4 bg-gradient-to-r from-primary/10 to-transparent rounded-lg border border-primary/20">
-              <h3 className="font-semibold text-gray-900 mb-2">Key Insights</h3>
-              <div className="space-y-1 text-sm text-gray-700">
-                <p>
-                  📈 {stats.invoice_count} invoices generated ₹{parseFloat(String(stats.total_sales || 0)).toFixed(0)} in total sales
-                </p>
-                <p>
-                  💰 Average invoice value is ₹{parseFloat(String(stats.avg_invoice || 0)).toFixed(0)}
-                </p>
-                <p>
-                  🏆 Highest invoice was worth ₹{parseFloat(String(stats.max_invoice || 0)).toFixed(0)}
-                </p>
-                <p>
-                  🧾 Collected ₹{parseFloat(String(stats.gst_collected || 0)).toFixed(0)} in GST
-                </p>
-              </div>
-            </div>
+          <div className="h-[300px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={trends}>
+                <defs>
+                  <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.2}/>
+                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{fontSize: 10}} />
+                <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10}} />
+                <Tooltip contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px rgba(0,0,0,0.1)'}} />
+                <Area type="monotone" dataKey="total" stroke="#6366f1" strokeWidth={3} fill="url(#colorTotal)" />
+              </AreaChart>
+            </ResponsiveContainer>
           </div>
-        </>
-      ) : (
-        <div className="card text-center py-16 bg-gradient-to-br from-gray-50 to-gray-100">
-          <svg className="w-16 h-16 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-            />
-          </svg>
-          <h3 className="text-xl font-semibold text-gray-900 mb-2">No data available</h3>
-          <p className="text-gray-600">No invoices were created on the selected date</p>
         </div>
-      )}
+
+        <div className="card p-6">
+          <h2 className="text-xl font-bold mb-6">Transaction Volume</h2>
+          <div className="h-[300px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={trends}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{fontSize: 10}} />
+                <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10}} />
+                <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '12px', border: 'none'}} />
+                <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="card p-6">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-bold">Data Summary</h2>
+          <span className="text-xs font-bold uppercase bg-primary/10 text-primary px-3 py-1 rounded-full">{statsPeriod} Aggregation</span>
+        </div>
+        <div className="overflow-hidden rounded-xl border border-gray-100">
+          <table className="w-full text-left">
+            <tbody className="divide-y divide-gray-100">
+              <TableRow label="Gross Sales" value={`₹${stats?.subtotal || 0}`} />
+              <TableRow label="Total Tax (GST)" value={`₹${stats?.gst_collected || 0}`} />
+              <TableRow label="Net Revenue" value={`₹${stats?.total_sales || 0}`} isBold />
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
+  );
+}
+
+function StatCard({ title, value, icon, color }: { title: string; value: string | number; icon: string; color: string }) {
+  const colorMap: Record<string, string> = {
+    blue: 'bg-blue-50 text-blue-600',
+    green: 'bg-green-50 text-green-600',
+    purple: 'bg-purple-50 text-purple-600',
+    orange: 'bg-orange-50 text-orange-600',
+  };
+  return (
+    <div className="card p-6 flex items-center gap-4">
+      <div className={`p-4 rounded-2xl text-2xl ${colorMap[color]}`}>{icon}</div>
+      <div>
+        <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{title}</p>
+        <p className="text-2xl font-black text-gray-900">{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function TableRow({ label, value, isBold }: { label: string; value: string | number; isBold?: boolean }) {
+  return (
+    <tr className={isBold ? 'bg-primary/5' : ''}>
+      <td className={`px-6 py-4 text-sm ${isBold ? 'font-bold text-primary' : 'text-gray-600'}`}>{label}</td>
+      <td className={`px-6 py-4 text-sm text-right ${isBold ? 'font-bold text-primary text-lg' : 'font-semibold text-gray-900'}`}>{value}</td>
+    </tr>
   );
 }

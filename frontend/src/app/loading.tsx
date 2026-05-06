@@ -1,6 +1,6 @@
 'use client';
 
-export default function Loading(): JSX.Element {
+export default function Loading(): React.ReactNode {
   return (
     <div className="flex items-center justify-center min-h-screen bg-gray-50">
       <div className="text-center">

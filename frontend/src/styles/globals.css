@@ -1,6 +1,11 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #667eea;
+  --color-primary-dark: #5a67d8;
+  --color-secondary: #ed64a6;
+  --color-danger: #f56565;
+}
 
 @layer components {
   /* Buttons */
@@ -70,19 +75,19 @@
   }
 
   .badge-primary {
-    @apply badge bg-blue-100 text-blue-800;
+    @apply inline-block px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800;
   }
 
   .badge-danger {
-    @apply badge bg-red-100 text-red-800;
+    @apply inline-block px-3 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800;
   }
 
   .badge-success {
-    @apply badge bg-green-100 text-green-800;
+    @apply inline-block px-3 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800;
   }
 
   .badge-warning {
-    @apply badge bg-yellow-100 text-yellow-800;
+    @apply inline-block px-3 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800;
   }
 
   /* Alerts */
@@ -91,19 +96,19 @@
   }
 
   .alert-success {
-    @apply alert bg-green-50 border-green-200 text-green-800;
+    @apply px-4 py-3 rounded-lg border bg-green-50 border-green-200 text-green-800;
   }
 
   .alert-error {
-    @apply alert bg-red-50 border-red-200 text-red-800;
+    @apply px-4 py-3 rounded-lg border bg-red-50 border-red-200 text-red-800;
   }
 
   .alert-warning {
-    @apply alert bg-yellow-50 border-yellow-200 text-yellow-800;
+    @apply px-4 py-3 rounded-lg border bg-yellow-50 border-yellow-200 text-yellow-800;
   }
 
   .alert-info {
-    @apply alert bg-blue-50 border-blue-200 text-blue-800;
+    @apply px-4 py-3 rounded-lg border bg-blue-50 border-blue-200 text-blue-800;
   }
 }
 

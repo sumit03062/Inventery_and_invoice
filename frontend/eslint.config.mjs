@@ -22,6 +22,7 @@ const eslintConfig = defineConfig([
     files: ["**/*.{js,jsx,ts,tsx}"],
     plugins: {
       "@next/next": nextPlugin,
+      "react-hooks": (await import("eslint-plugin-react-hooks")).default,
     },
     rules: {
       ...nextPlugin.configs.recommended.rules,

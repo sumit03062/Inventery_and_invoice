@@ -11,7 +11,7 @@ interface LoginFormState {
   loading: boolean;
 }
 
-export default function LoginPage(): JSX.Element {
+export default function LoginPage(): React.ReactNode {
   const [formState, setFormState] = useState<LoginFormState>({
     username: '',
     password: '',
@@ -215,6 +215,15 @@ export default function LoginPage(): JSX.Element {
           </div>
 
           {/* Footer */}
+          <div className="pt-4 border-t border-gray-100 text-center">
+            <p className="text-sm text-gray-600">
+              Don't have a business account?{' '}
+              <a href="/register" className="font-bold text-primary hover:underline">
+                Register here
+              </a>
+            </p>
+          </div>
+
           <p className="text-center text-xs text-gray-500">
             Protected by JWT Authentication • Built with Next.js
           </p>
