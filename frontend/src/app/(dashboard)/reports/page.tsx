@@ -1,213 +1,28 @@
 'use client';
-
-import { useState } from 'react';
-import { api } from '@/lib/api';
-import { DailySalesStats } from '@/types';
-import { useQuery } from '@tanstack/react-query';
+import {useState} from 'react';
+import {Download,Printer} from 'lucide-react';
+import {useData,Heading,Panel,Status,Field,Empty} from '@/components/ui';
+import {useAuth} from '@/hooks/useAuth';
+import {currency,localDate,dateTime,download} from '@/lib/api';
+import type {ReportData} from '@/types';
+import SalesChart from '@/components/SalesChart';
+import Link from 'next/link';
 import toast from 'react-hot-toast';
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-} from 'recharts';
-import { 
-  Printer, 
-  Download, 
-  FileText, 
-  TrendingUp, 
-  Building2, 
-  BarChart3, 
-  Trophy, 
-  Calendar 
-} from 'lucide-react';
-
-interface TrendData {
-  label: string;
-  total: number;
-  count: number;
+export default function Reports(){
+ const {can}=useAuth();const [from,setFrom]=useState(localDate());const [to,setTo]=useState(localDate());const [tab,setTab]=useState('sales');
+ const query='?from='+from+'&to='+to;const q=useData<ReportData>('/reports/'+query,can('reports.view')&&!!from&&!!to);
+ const preset=(period:string)=>{const today=localDate();setTo(today);if(period==='daily')setFrom(today);else if(period==='weekly'){const date=new Date(today+'T12:00:00');date.setDate(date.getDate()-6);setFrom(localDate(date));}else setFrom(today.slice(0,8)+'01');};
+ const data=q.data;
+ return <><Heading title="Reports" description="Sales, collections, GST and outstanding balances."><button className="btn" onClick={()=>window.print()}><Printer size={16}/>Print</button><button className="btn" onClick={async()=>{try{await download('/reports/export/'+query,'sales-'+from+'-'+to+'.csv');}catch(e){toast.error(e instanceof Error?e.message:'Export failed');}}}><Download size={16}/>Export invoices</button></Heading>
+ <div className="toolbar"><Field label="From"><input type="date" value={from} onChange={e=>setFrom(e.target.value)} max={to}/></Field><Field label="To"><input type="date" value={to} onChange={e=>setTo(e.target.value)} min={from}/></Field>{['daily','weekly','monthly'].map(p=><button className="btn small" key={p} onClick={()=>preset(p)}>{p==='daily'?'Today':p==='weekly'?'Last 7 days':'This month'}</button>)}</div>
+ <div className="tabs">{['sales','gst','inventory','staff','customers','udhar','payments'].map(t=><button key={t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t==='gst'?'GST':t.charAt(0).toUpperCase()+t.slice(1)}</button>)}</div><Status loading={q.isLoading} error={q.error} retry={q.refetch}/>
+ {data&&<><div className="metrics">{[['Sales',data.stats.sales],['Collections (net)',data.stats.collections],['Udhar given',data.stats.udhar],['Outstanding now',data.total_outstanding]].map(([label,value])=><div className="metric" key={label}><div><label>{label}</label><strong>{currency(value)}</strong></div></div>)}</div>
+ {tab==='sales'&&<><Panel title="Sales vs collections"><SalesChart data={data.trend}/><p className="muted">Sales use active invoices issued in this period. Collections use payment dates, less recorded refunds. Outstanding is the current all-time ledger balance.</p></Panel><Panel title="Payment-method breakdown"><ReportTable headers={['Method','Receipts','Refunds','Net collection']} rows={data.methods.map(m=>[m.method,currency(m.receipts),currency(m.refunds),currency(m.net)])}/></Panel><Panel title="Daily totals"><ReportTable headers={['Date','Invoices','Sales','Collections','Udhar given']} rows={data.trend.map(d=>[d.date,d.invoice_count,currency(d.sales),currency(d.collections),currency(d.udhar)])}/></Panel></>}
+ {tab==='gst'&&<Panel title="GST summary"><div className="total-row"><span>Invoices</span><strong>{data.stats.invoice_count}</strong></div><div className="total-row"><span>Discounts before tax</span><strong>{currency(data.stats.discount)}</strong></div><div className="total-row"><span>GST on active invoices</span><strong>{currency(data.stats.gst)}</strong></div><div className="total-row"><span>Taxable sales after discount</span><strong>{currency(Number(data.stats.sales)-Number(data.stats.gst))}</strong></div><p className="muted" style={{marginTop:18}}>This is a sales tax summary, not a tax filing. Voided invoices are excluded. The CSV retains their status for reconciliation.</p></Panel>}
+ {tab==='inventory'&&<><Panel title="Top-selling products"><ReportTable headers={['Product','Units sold','Sales total']} rows={data.top_products.map(p=>[p.name,p.quantity,currency(p.total)])}/></Panel><Panel title="Current low-stock products"><ReportTable headers={['Product','SKU','Stock','Threshold']} rows={data.low_stock.map(p=>[p.name,p.sku,p.stock_quantity,p.low_stock_threshold])}/></Panel></>}
+ {tab==='staff'&&<Panel title="Staff-wise sales"><ReportTable headers={['Staff','Sales']} rows={data.staff.map(s=>[s.created_by__username,currency(s.total)])}/></Panel>}
+ {tab==='customers'&&<Panel title="Customer-wise purchases"><ReportTable headers={['Customer','Purchases in period']} rows={data.customers.map(c=>[c.customer_snapshot__name,currency(c.total)])}/></Panel>}
+ {tab==='udhar'&&<Panel title="Customer balances now"><ReportTable headers={['Customer','Outstanding','Status']} rows={data.outstanding.filter(c=>Number(c.outstanding)>0).map(c=>[<Link key={c.id} className="table-link" href={'/customers/'+c.id}>{c.name}</Link>,currency(c.outstanding),c.overdue?'Overdue':'Due'])}/></Panel>}
+ {tab==='payments'&&<Panel title="Collection and refund register"><ReportTable headers={['Date','Customer','Method','Type','Amount','Recorded by']} rows={data.payments.map(p=>[dateTime(p.transaction_date),p.customer_name,p.method,p.direction,currency(p.amount),p.created_by_name])}/></Panel>}</>}</>;
 }
-
-export default function ReportsPage(): React.ReactNode {
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [period, setPeriod] = useState<'daily' | 'monthly'>('daily');
-  const [statsPeriod, setStatsPeriod] = useState<'daily' | 'monthly' | 'yearly'>('daily');
-
-  // 1. Data Fetching with useQuery
-  const { data: stats, isLoading: loadingStats } = useQuery({
-    queryKey: ['reports', 'stats', selectedDate, statsPeriod],
-    queryFn: async () => {
-      const res = await api.get<DailySalesStats>(`/reports/daily-sales/?date=${selectedDate}&period=${statsPeriod}`);
-      return res.data;
-    },
-  });
-
-  const { data: trends = [], isLoading: loadingTrends } = useQuery({
-    queryKey: ['reports', 'trends', period],
-    queryFn: async () => {
-      const res = await api.get<{ results: TrendData[] }>(`/reports/sales-trend/?period=${period}`);
-      return res.data.results || [];
-    },
-  });
-
-  const handleExportCSV = async () => {
-    const toastId = toast.loading('Generating CSV...');
-    try {
-      const response = await api.get('/reports/export-csv/', { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `sales_export_${new Date().toISOString().split('T')[0]}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      link.parentNode?.removeChild(link);
-      toast.success('Export complete!', { id: toastId });
-    } catch (err) {
-      toast.error('Export failed', { id: toastId });
-    }
-  };
-
-  if (loadingStats && !stats) return <div className="flex items-center justify-center min-h-screen"><div className="spinner"></div></div>;
-
-  return (
-    <div className="py-6 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 mb-8">
-        <div>
-          <h1 className="text-4xl font-bold text-gray-900">Analytics</h1>
-          <p className="text-gray-600 mt-2">Data-driven insights for your shop</p>
-        </div>
-
-        <div className="flex flex-wrap gap-3">
-          <button onClick={() => window.print()} className="btn-secondary flex items-center gap-2">
-            <Printer size={18} /> Print Report
-          </button>
-          <button onClick={handleExportCSV} className="btn-secondary flex items-center gap-2">
-            <Download size={18} /> Export CSV
-          </button>
-          <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-gray-300">
-            <select value={statsPeriod} onChange={(e) => setStatsPeriod(e.target.value as any)} className="border-0 focus:ring-0 text-sm font-semibold bg-transparent">
-              <option value="daily">Day</option>
-              <option value="monthly">Month</option>
-              <option value="yearly">Year</option>
-            </select>
-            <div className="w-[1px] h-4 bg-gray-300 mx-1"></div>
-            <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="border-0 focus:ring-0 text-sm" />
-          </div>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
-        <StatCard title="Invoices" value={stats?.invoice_count || 0} icon={<FileText size={24} />} color="blue" />
-        <StatCard title="Revenue" value={`₹${stats?.total_sales || 0}`} icon={<TrendingUp size={24} />} color="green" />
-        <StatCard title="GST" value={`₹${stats?.gst_collected || 0}`} icon={<Building2 size={24} />} color="purple" />
-        <StatCard title="Average" value={`₹${stats?.avg_invoice?.toFixed(2) || 0}`} icon={<BarChart3 size={24} />} color="orange" />
-        <StatCard title="Highest" value={`₹${stats?.max_invoice?.toFixed(2) || 0}`} icon={<Trophy size={24} />} color="red" />
-      </div>
-
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
-        <div className="lg:col-span-2 card p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-bold">Sales Performance</h2>
-            <div className="flex gap-2 bg-gray-100 p-1 rounded-lg">
-              {['daily', 'monthly'].map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setPeriod(p as any)}
-                  className={`px-4 py-1 rounded-md text-xs font-bold transition-all ${period === p ? 'bg-white shadow text-primary' : 'text-gray-500'}`}
-                >
-                  {p === 'daily' ? '30 Days' : '12 Months'}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={trends}>
-                <defs>
-                  <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.2}/>
-                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{fontSize: 10}} />
-                <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10}} />
-                <Tooltip contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px rgba(0,0,0,0.1)'}} />
-                <Area type="monotone" dataKey="total" stroke="#6366f1" strokeWidth={3} fill="url(#colorTotal)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="card p-6">
-          <h2 className="text-xl font-bold mb-6">Transaction Volume</h2>
-          <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={trends}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{fontSize: 10}} />
-                <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10}} />
-                <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '12px', border: 'none'}} />
-                <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </div>
-
-      {/* Table */}
-      <div className="card p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-bold">Data Summary</h2>
-          <span className="text-xs font-bold uppercase bg-primary/10 text-primary px-3 py-1 rounded-full">{statsPeriod} Aggregation</span>
-        </div>
-        <div className="overflow-hidden rounded-xl border border-gray-100">
-          <table className="w-full text-left">
-            <tbody className="divide-y divide-gray-100">
-              <TableRow label="Gross Sales" value={`₹${stats?.subtotal || 0}`} />
-              <TableRow label="Total Tax (GST)" value={`₹${stats?.gst_collected || 0}`} />
-              <TableRow label="Net Revenue" value={`₹${stats?.total_sales || 0}`} isBold />
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function StatCard({ title, value, icon, color }: { title: string; value: string | number; icon: React.ReactNode; color: string }) {
-  const colorMap: Record<string, string> = {
-    blue: 'bg-blue-50 text-blue-600',
-    green: 'bg-green-50 text-green-600',
-    purple: 'bg-purple-50 text-purple-600',
-    orange: 'bg-orange-50 text-orange-600',
-    red: 'bg-red-50 text-red-600',
-  };
-  return (
-    <div className="card p-6 flex items-center gap-4">
-      <div className={`p-4 rounded-2xl ${colorMap[color]}`}>{icon}</div>
-      <div>
-        <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{title}</p>
-        <p className="text-2xl font-black text-gray-900">{value}</p>
-      </div>
-    </div>
-  );
-}
-
-function TableRow({ label, value, isBold }: { label: string; value: string | number; isBold?: boolean }) {
-  return (
-    <tr className={isBold ? 'bg-primary/5' : ''}>
-      <td className={`px-6 py-4 text-sm ${isBold ? 'font-bold text-primary' : 'text-gray-600'}`}>{label}</td>
-      <td className={`px-6 py-4 text-sm text-right ${isBold ? 'font-bold text-primary text-lg' : 'font-semibold text-gray-900'}`}>{value}</td>
-    </tr>
-  );
-}
+function ReportTable({headers,rows}:{headers:string[];rows:React.ReactNode[][]}){return rows.length?<div className="table-wrap"><table><thead><tr>{headers.map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{rows.map((r,i)=><tr key={i}>{r.map((c,j)=><td key={j}>{c}</td>)}</tr>)}</tbody></table></div>:<Empty text="No records in this period."/>;}

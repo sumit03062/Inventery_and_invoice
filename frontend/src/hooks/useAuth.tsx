@@ -1,125 +1,30 @@
 'use client';
-
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
-import Cookies from 'js-cookie';
-import { api } from '@/lib/api';
-import { User, AuthContextType, TokenResponse } from '@/types';
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const router = useRouter();
-
-  useEffect(() => {
-    const initializeAuth = async () => {
-      try {
-        const storedToken = Cookies.get('access_token');
-        if (storedToken) {
-          setToken(storedToken);
-          await fetchCurrentUser();
-        }
-      } catch (error) {
-        console.error('Auth initialization error:', error);
-        Cookies.remove('access_token');
-        Cookies.remove('refresh_token');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    initializeAuth();
-  }, []);
-
-  const fetchCurrentUser = useCallback(async () => {
-    try {
-      const response = await api.get<User>('/users/me/');
-      setUser(response.data);
-      return true;
-    } catch (error) {
-      console.error('Failed to fetch user:', error);
-      Cookies.remove('access_token');
-      Cookies.remove('refresh_token');
-      setToken(null);
-      setUser(null);
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const login = useCallback(async (
-    username: string,
-    password: string
-  ): Promise<boolean> => {
-    try {
-      setLoading(true);
-
-      if (!username.trim() || !password.trim()) {
-        console.error('Username and password are required');
-        return false;
-      }
-
-      const response = await api.post<TokenResponse>('/token/', {
-        username,
-        password,
-      });
-
-      const { access, refresh } = response.data;
-
-      Cookies.set('access_token', access, { expires: 7 });
-      Cookies.set('refresh_token', refresh, { expires: 30 });
-
-      setToken(access);
-      api.getClient().defaults.headers.common.Authorization = `Bearer ${access}`;
-
-      const userFetched = await fetchCurrentUser();
-
-      if (userFetched) {
-        return true;
-      } else {
-        return false;
-      }
-    } catch (error) {
-      console.error('Login failed:', error);
-      Cookies.remove('access_token');
-      Cookies.remove('refresh_token');
-      setToken(null);
-      setUser(null);
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  }, [fetchCurrentUser]);
-
-  const logout = useCallback(() => {
-    Cookies.remove('access_token');
-    Cookies.remove('refresh_token');
-    setUser(null);
-    setToken(null);
-    api.getClient().defaults.headers.common.Authorization = '';
-    router.push('/login');
-  }, [router]);
-
-  const value: AuthContextType = {
-    user,
-    token,
-    loading,
-    login,
-    logout,
-    isAuthenticated: !!token && !!user,
-  };
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { api, send, setCsrf } from '@/lib/api';
+import type { User } from '@/types';
+interface Session { user: User|null; csrf: string; needs_setup?: boolean }
+interface Auth { user: User|null; loading: boolean; needsSetup: boolean; error: string; login: (username:string,password:string)=>Promise<void>; setup: (data:unknown)=>Promise<void>; logout: ()=>Promise<void>; can:(permission:string)=>boolean }
+const Context = createContext<Auth|null>(null);
+export function AuthProvider({children}:{children:React.ReactNode}) {
+ const [user,setUser]=useState<User|null>(null);
+ const [loading,setLoading]=useState(true);
+ const [needsSetup,setNeedsSetup]=useState(false);
+ const [error,setError]=useState('');
+ const client=useQueryClient();
+ const accept=useCallback(async (s:Session) => {
+   await client.cancelQueries(); client.clear(); setCsrf(s.csrf); setUser(s.user); setNeedsSetup(!!s.needs_setup); setError('');
+ },[client]);
+ useEffect(() => {
+   let active=true;
+   api<Session>('/session/').then(s=>{if(active){setCsrf(s.csrf);setUser(s.user);setNeedsSetup(!!s.needs_setup);}}).catch(e=>{if(active)setError(e.message);}).finally(()=>{if(active)setLoading(false);});
+   const expire=()=>{client.cancelQueries();client.clear();setUser(null);};
+   window.addEventListener('session-expired',expire);
+   return ()=>{active=false;window.removeEventListener('session-expired',expire);};
+ },[client]);
+ const login=async(username:string,password:string)=>{await accept(await send<Session>('/login/',{username,password}));};
+ const setup=async(data:unknown)=>{await accept(await send<Session>('/setup/',data));};
+ const logout=async()=>{await send('/logout/',{});await accept({user:null,csrf:''});const s=await api<Session>('/session/');setCsrf(s.csrf);};
+ return <Context.Provider value={{user,loading,needsSetup,error,login,setup,logout,can:p=>!!user?.permissions.includes(p)}}>{children}</Context.Provider>;
 }
-
-export function useAuth(): AuthContextType {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-}
+export function useAuth(){const value=useContext(Context);if(!value)throw new Error('AuthProvider required');return value;}

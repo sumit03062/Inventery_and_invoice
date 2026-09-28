@@ -1,57 +1,17 @@
 'use client';
-
-import { FileText } from 'lucide-react';
-import AuthSwitch from '@/components/ui/auth-switch';
-
-/**
- * demo.tsx pattern:
- *   import AuthSwitch from './auth-switch';
- *   export default function Demo() { return <AuthSwitch />; }
- *
- * This login page IS the demo — it wraps AuthSwitch in the page shell.
- */
-export default function LoginPage(): React.ReactNode {
-  return (
-    <div className="min-h-screen bg-black flex items-center justify-center px-4">
-      {/* Ambient glow */}
-      <div className="pointer-events-none fixed inset-0 flex items-center justify-center">
-        <div className="w-[600px] h-[400px] rounded-full bg-[#0071e3] opacity-[0.07] blur-[120px]" />
-      </div>
-
-      <div className="relative w-full max-w-sm">
-        {/* Logo */}
-        <div className="flex flex-col items-center mb-8">
-          <div className="w-14 h-14 rounded-2xl bg-[#0071e3] flex items-center justify-center mb-4 shadow-lg shadow-[#0071e3]/30">
-            <FileText size={26} className="text-white" strokeWidth={1.5} />
-          </div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">Invoice Manager</h1>
-          <p className="text-[#6e6e73] text-sm mt-1">Manage invoices and inventory</p>
-        </div>
-
-        {/* ── AuthSwitch form card ── */}
-        <div className="bg-[#1d1d1f] rounded-2xl p-8 border border-white/[0.08] shadow-2xl shadow-black/60">
-          <AuthSwitch />
-        </div>
-
-        {/* Demo hint */}
-        <div className="mt-4 rounded-xl border border-white/[0.06] bg-white/[0.03] p-4 text-center">
-          <p className="text-[#6e6e73] text-[11px] font-semibold uppercase tracking-wider mb-1.5">
-            Demo Credentials
-          </p>
-          <div className="flex justify-center gap-6 text-sm">
-            <span className="text-white/50">
-              User: <code className="text-white font-mono">admin</code>
-            </span>
-            <span className="text-white/50">
-              Pass: <code className="text-white font-mono">password123</code>
-            </span>
-          </div>
-        </div>
-
-        <p className="text-center text-[#3a3a3c] text-xs mt-5">
-          Protected by JWT Authentication · Invoice Manager
-        </p>
-      </div>
-    </div>
-  );
+import {useState,useEffect} from 'react';
+import {useRouter} from 'next/navigation';
+import {useAuth} from '@/hooks/useAuth';
+import {Field} from '@/components/ui';
+import {Store,ArrowRight} from 'lucide-react';
+export default function Login(){
+ const auth=useAuth();const router=useRouter();const [busy,setBusy]=useState(false);const [error,setError]=useState('');
+ useEffect(()=>{if(auth.user)router.replace(auth.can('reports.view')?'/dashboard':'/billing');},[auth.user,auth,router]);
+ if(auth.loading)return <div className="empty">Opening Shopbook…</div>;
+ return <main className="auth-page"><section className="auth-story"><Store size={40}/><h1>Your shop.<br/>Everything in order.</h1><p>Billing, stock, customers and Udhar.<br/>One place to run your day.</p><div className="auth-note">Every sale recorded.<br/>Every balance accounted for.</div></section><section className="auth-form"><div className="brand">Shopbook</div><h2>{auth.needsSetup?'Set up your shop':'Welcome back'}</h2><p>{auth.needsSetup?'Create the owner account for this shop.':'Sign in with your owner or staff account.'}</p>
+ {(error||auth.error)&&<div className="notice danger" role="alert">{error||auth.error}{auth.error&&<button className="btn" onClick={()=>location.reload()}>Retry connection</button>}</div>}
+ <form onSubmit={async e=>{e.preventDefault();setBusy(true);setError('');const data=Object.fromEntries(new FormData(e.currentTarget));try{if(auth.needsSetup)await auth.setup(data);else await auth.login(String(data.username),String(data.password));}catch(e){setError(e instanceof Error?e.message:'Unable to sign in');}finally{setBusy(false);}}}>
+ {auth.needsSetup&&<><Field label="Shop name"><input name="shop_name" required maxLength={150} autoComplete="organization"/></Field><Field label="Owner name"><input name="owner_name" required maxLength={150} autoComplete="name"/></Field></>}
+ <Field label="Username"><input name="username" required autoComplete="username" maxLength={150}/></Field><Field label="Password" hint={auth.needsSetup?'At least 8 characters. Avoid common or numeric-only passwords.':undefined}><input name="password" type="password" required minLength={auth.needsSetup?8:1} autoComplete={auth.needsSetup?'new-password':'current-password'}/></Field>
+ <button className="btn primary wide" disabled={busy||!!auth.error}>{busy?'Please wait…':auth.needsSetup?'Create shop':'Sign in'}<ArrowRight size={17}/></button></form><small className="muted">Staff accounts are created by the shop owner.</small></section></main>;
 }
