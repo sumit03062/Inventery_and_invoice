@@ -61,6 +61,7 @@ export interface InvoiceItem {
 }
 
 export interface Invoice {
+  customer_name: ReactNode;
   id: number;
   invoice_number: string;
   subtotal: number;

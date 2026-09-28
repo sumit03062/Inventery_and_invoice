@@ -16,6 +16,16 @@ import {
   BarChart,
   Bar,
 } from 'recharts';
+import { 
+  Printer, 
+  Download, 
+  FileText, 
+  TrendingUp, 
+  Building2, 
+  BarChart3, 
+  Trophy, 
+  Calendar 
+} from 'lucide-react';
 
 interface TrendData {
   label: string;
@@ -74,8 +84,11 @@ export default function ReportsPage(): React.ReactNode {
         </div>
 
         <div className="flex flex-wrap gap-3">
+          <button onClick={() => window.print()} className="btn-secondary flex items-center gap-2">
+            <Printer size={18} /> Print Report
+          </button>
           <button onClick={handleExportCSV} className="btn-secondary flex items-center gap-2">
-            📥 Export CSV
+            <Download size={18} /> Export CSV
           </button>
           <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-gray-300">
             <select value={statsPeriod} onChange={(e) => setStatsPeriod(e.target.value as any)} className="border-0 focus:ring-0 text-sm font-semibold bg-transparent">
@@ -90,11 +103,12 @@ export default function ReportsPage(): React.ReactNode {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <StatCard title="Invoices" value={stats?.invoice_count || 0} icon="📄" color="blue" />
-        <StatCard title="Revenue" value={`₹${stats?.total_sales || 0}`} icon="💰" color="green" />
-        <StatCard title="GST" value={`₹${stats?.gst_collected || 0}`} icon="🏛️" color="purple" />
-        <StatCard title="Average" value={`₹${stats?.avg_invoice || 0}`} icon="📊" color="orange" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+        <StatCard title="Invoices" value={stats?.invoice_count || 0} icon={<FileText size={24} />} color="blue" />
+        <StatCard title="Revenue" value={`₹${stats?.total_sales || 0}`} icon={<TrendingUp size={24} />} color="green" />
+        <StatCard title="GST" value={`₹${stats?.gst_collected || 0}`} icon={<Building2 size={24} />} color="purple" />
+        <StatCard title="Average" value={`₹${stats?.avg_invoice?.toFixed(2) || 0}`} icon={<BarChart3 size={24} />} color="orange" />
+        <StatCard title="Highest" value={`₹${stats?.max_invoice?.toFixed(2) || 0}`} icon={<Trophy size={24} />} color="red" />
       </div>
 
       {/* Charts */}
@@ -170,16 +184,17 @@ export default function ReportsPage(): React.ReactNode {
   );
 }
 
-function StatCard({ title, value, icon, color }: { title: string; value: string | number; icon: string; color: string }) {
+function StatCard({ title, value, icon, color }: { title: string; value: string | number; icon: React.ReactNode; color: string }) {
   const colorMap: Record<string, string> = {
     blue: 'bg-blue-50 text-blue-600',
     green: 'bg-green-50 text-green-600',
     purple: 'bg-purple-50 text-purple-600',
     orange: 'bg-orange-50 text-orange-600',
+    red: 'bg-red-50 text-red-600',
   };
   return (
     <div className="card p-6 flex items-center gap-4">
-      <div className={`p-4 rounded-2xl text-2xl ${colorMap[color]}`}>{icon}</div>
+      <div className={`p-4 rounded-2xl ${colorMap[color]}`}>{icon}</div>
       <div>
         <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{title}</p>
         <p className="text-2xl font-black text-gray-900">{value}</p>

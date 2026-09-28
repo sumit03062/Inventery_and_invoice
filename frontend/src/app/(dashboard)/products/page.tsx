@@ -5,6 +5,15 @@ import { api } from '@/lib/api';
 import { Product, CreateProductInput } from '@/types';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { 
+  Plus, 
+  Search, 
+  AlertTriangle, 
+  Edit2, 
+  Trash2, 
+  X,
+  Package
+} from 'lucide-react';
 
 interface ProductFormState extends CreateProductInput {
   errors: Record<string, string>;
@@ -39,7 +48,7 @@ export default function ProductsPage(): React.ReactNode {
     if (products.length > 0) {
       const lowStockItems = products.filter(p => p.is_low_stock);
       if (lowStockItems.length > 0) {
-        toast.error(`⚠️ ${lowStockItems.length} items are low on stock!`, {
+        toast.error(`${lowStockItems.length} items are low on stock!`, {
           id: 'low-stock-alert',
           duration: 5000,
         });
@@ -167,9 +176,9 @@ export default function ProductsPage(): React.ReactNode {
         </div>
         <button
           onClick={() => (showForm ? handleCancelEdit() : setShowForm(true))}
-          className="btn-primary self-start sm:self-auto"
+          className="btn-primary flex items-center gap-2 self-start sm:self-auto"
         >
-          {showForm ? 'Cancel' : '+ Add Product'}
+          {showForm ? <><X size={18} /> Cancel</> : <><Plus size={18} /> Add Product</>}
         </button>
       </div>
 
@@ -208,13 +217,14 @@ export default function ProductsPage(): React.ReactNode {
       )}
 
       {/* Search and Grid */}
-      <div className="mb-6">
+      <div className="mb-6 relative max-w-md">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
         <input
           type="text"
-          placeholder="🔍 Search inventory..."
+          placeholder="Search inventory..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="input-field max-w-md shadow-sm"
+          className="input-field pl-10 shadow-sm"
         />
       </div>
 
@@ -244,15 +254,19 @@ export default function ProductsPage(): React.ReactNode {
             </div>
 
             <div className="flex gap-2">
-              <button onClick={() => handleEditClick(product)} className="btn-secondary btn-small flex-1 text-xs py-2">Edit</button>
+              <button onClick={() => handleEditClick(product)} className="btn-secondary btn-small flex-1 text-xs py-2 flex items-center justify-center gap-1">
+                <Edit2 size={14} /> Edit
+              </button>
               <button 
                 onClick={() => setDeleteConfirm(product.id)} 
-                className={`btn-small flex-1 text-xs py-2 ${deleteConfirm === product.id ? 'btn-danger' : 'text-red-600 hover:bg-red-50'}`}
+                className={`btn-small flex-1 text-xs py-2 flex items-center justify-center gap-1 ${deleteConfirm === product.id ? 'btn-danger' : 'text-red-600 hover:bg-red-50'}`}
               >
-                {deleteConfirm === product.id ? 'Confirm?' : 'Delete'}
+                <Trash2 size={14} /> {deleteConfirm === product.id ? 'Confirm?' : 'Delete'}
               </button>
               {deleteConfirm === product.id && (
-                <button onClick={() => setDeleteConfirm(null)} className="p-2 text-gray-400 hover:text-gray-600">✕</button>
+                <button onClick={() => setDeleteConfirm(null)} className="p-2 text-gray-400 hover:text-gray-600">
+                  <X size={16} />
+                </button>
               )}
             </div>
             
@@ -266,6 +280,22 @@ export default function ProductsPage(): React.ReactNode {
             )}
           </div>
         ))}
+      </div>
+
+      {/* Summary Cards */}
+      <div className="mt-12 grid grid-cols-1 sm:grid-cols-3 gap-6 bg-gray-50 p-8 rounded-3xl border border-gray-100">
+        <div className="text-center">
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Total Products</p>
+          <p className="text-3xl font-black text-gray-900">{products.length}</p>
+        </div>
+        <div className="text-center border-y sm:border-y-0 sm:border-x border-gray-200 py-6 sm:py-0">
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Stock Value</p>
+          <p className="text-3xl font-black text-primary">₹{products.reduce((acc, p) => acc + (Number(p.price) * p.stock_quantity), 0).toLocaleString()}</p>
+        </div>
+        <div className="text-center">
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Low Stock Items</p>
+          <p className="text-3xl font-black text-red-600">{products.filter(p => p.is_low_stock).length}</p>
+        </div>
       </div>
     </div>
   );

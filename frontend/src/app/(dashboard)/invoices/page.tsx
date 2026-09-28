@@ -5,6 +5,14 @@ import { api } from '@/lib/api';
 import { Invoice, Product, InvoiceItem, Customer } from '@/types';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { 
+  Plus, 
+  Trash2, 
+  Search, 
+  FileText, 
+  Ban, 
+  X 
+} from 'lucide-react';
 
 export default function InvoicesPage(): React.ReactNode {
   const queryClient = useQueryClient();
@@ -121,8 +129,8 @@ export default function InvoicesPage(): React.ReactNode {
           <h1 className="text-4xl font-bold text-gray-900">Invoices</h1>
           <p className="text-gray-600 mt-2">Create and manage your sales records</p>
         </div>
-        <button onClick={() => setShowForm(!showForm)} className="btn-primary">
-          {showForm ? 'Cancel' : '+ New Invoice'}
+        <button onClick={() => setShowForm(!showForm)} className="btn-primary flex items-center gap-2">
+          {showForm ? <><X size={18} /> Cancel</> : <><Plus size={18} /> New Invoice</>}
         </button>
       </div>
 
@@ -174,11 +182,15 @@ export default function InvoicesPage(): React.ReactNode {
                     }} className="input-field" />
                   </div>
                   {items.length > 1 && (
-                    <button type="button" onClick={() => setItems(items.filter((_, i) => i !== index))} className="p-2 text-red-500 hover:bg-red-50 rounded-lg">🗑️</button>
+                    <button type="button" onClick={() => setItems(items.filter((_, i) => i !== index))} className="p-2 text-red-500 hover:bg-red-50 rounded-lg">
+                      <Trash2 size={18} />
+                    </button>
                   )}
                 </div>
               ))}
-              <button type="button" onClick={() => setItems([...items, { product_id: '', quantity: 1 }])} className="text-primary text-sm font-bold">+ Add Item</button>
+              <button type="button" onClick={() => setItems([...items, { product_id: '', quantity: 1 }])} className="text-primary text-sm font-bold flex items-center gap-1 hover:underline">
+                <Plus size={16} /> Add Item
+              </button>
             </div>
 
             <div className="flex gap-3">
@@ -191,8 +203,15 @@ export default function InvoicesPage(): React.ReactNode {
       )}
 
       {/* List */}
-      <div className="mb-6">
-        <input type="text" placeholder="🔍 Search by invoice #..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="input-field max-w-md" />
+      <div className="mb-6 relative max-w-md">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+        <input 
+          type="text" 
+          placeholder="Search by invoice #..." 
+          value={searchTerm} 
+          onChange={(e) => setSearchTerm(e.target.value)} 
+          className="input-field pl-10 shadow-sm" 
+        />
       </div>
 
       <div className="card overflow-hidden">
@@ -219,7 +238,9 @@ export default function InvoicesPage(): React.ReactNode {
                     </span>
                   </td>
                   <td className="px-6 py-4 flex justify-center gap-2">
-                    <button onClick={() => downloadPDF(inv.id)} className="p-2 hover:bg-blue-50 text-blue-600 rounded-lg" title="PDF">📄</button>
+                    <button onClick={() => downloadPDF(inv.id)} className="p-2 hover:bg-blue-50 text-blue-600 rounded-lg" title="PDF">
+                      <FileText size={18} />
+                    </button>
                     {inv.status !== 'VOID' && (
                       <button 
                         onClick={() => {
@@ -228,7 +249,7 @@ export default function InvoicesPage(): React.ReactNode {
                         className="p-2 hover:bg-red-50 text-red-600 rounded-lg" 
                         title="Void"
                       >
-                        🚫
+                        <Ban size={18} />
                       </button>
                     )}
                   </td>
