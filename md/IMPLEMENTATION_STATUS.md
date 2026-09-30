@@ -20,7 +20,7 @@ Give one shop owner a single dashboard for daily billing, stock, staff, customer
 | Reports | Date filters, sales/collections, payment methods, GST summary, stock, top products, staff/customer totals, Udhar, CSV/print |
 | Operations | Local SQLite storage, backup command, container configuration, CI checks, documented setup |
 
-## Verification
+## Verification of the initial release
 
 - Full backend run: 33 tests passed, including permissions, CSRF, disabled sessions, financial rounding, payment allocation, rollback, snapshots, PDFs, and simultaneous billing.
 - After fixing backup file closure on Windows, the targeted concurrency/backup suite passed all 3 tests. There are now 34 backend tests in total; file-backed tests require `TEST_DATABASE_PATH`.
@@ -48,10 +48,14 @@ Deliberate differences: live values replace illustrative numbers; explanatory me
 ## Scope limits and deployment work
 
 - Refunds are accounting records; funds are returned separately.
-- Reminders are drafts that the user reviews and sends. There is no automated messaging provider.
-- GST support calculates configured product rates. HSN/SAC, CGST/SGST/IGST splitting, place-of-supply rules, return filing, and e-invoicing are not implemented.
+- WhatsApp Cloud API templates, consent checks, signed delivery callbacks and an optional reminder worker are implemented. Activation needs provider credentials and an approved template.
+- Domestic goods GST now supports HSN, units, inclusive pricing, state-based components, place of supply and full cancellation credit notes. Return filing, e-invoicing, partial returns and special tax regimes remain outside scope.
 - SQLite is intended for one shop on one host. Large datasets have not been load-tested; several screens load complete lists.
-- Production hosting, HTTPS, operational monitoring, shared login-throttle storage, and scheduled off-machine backups require deployment configuration. Container configuration was authored but not executed here.
-- Default PDF fonts target Latin-script text; Hindi and other Indic-script PDF shaping has not been verified.
+- Shared login-throttle storage, encrypted backup scheduling, health checks and HTTPS configuration are implemented. Hosting, external monitoring and off-machine backup copies still require deployment setup. Compose syntax was checked; containers were not run.
+- PDFs now include a Devanagari font with shaping; Hindi text, A4 invoices, credit notes and 80 mm receipts were rendered and inspected. Other scripts and physical printers remain unverified.
 
 See [README](../README.md) for startup, financial rules, backups, and deployment settings. The original [audit](PROJECT_AUDIT_REPORT.md) describes the checkout before these changes.
+
+## 30 September 2026 update
+
+Razorpay links and verified payment webhooks, WhatsApp Cloud API reminders, domestic GST, credit notes, thermal PDFs, encrypted backup recovery and deployment configuration have been added. All 52 backend tests pass, including file-backed concurrency. Provider calls are mocked in tests; no live money or messages were sent. See the [complete activation guide](GST_AND_INTEGRATIONS.md) for configuration, verification and remaining limits.

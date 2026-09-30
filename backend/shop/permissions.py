@@ -2,7 +2,7 @@ from rest_framework.exceptions import PermissionDenied
 
 ALL = ['products.write', 'prices.write', 'inventory.adjust', 'customers.write',
        'billing.create', 'billing.discount', 'invoices.void', 'ledger.payment',
-       'ledger.adjust', 'reports.view', 'settings.manage', 'staff.manage']
+       'ledger.adjust', 'reports.view', 'settings.manage', 'staff.manage', 'reminders.send', 'purchases.manage', 'expenses.manage', 'returns.create']
 DEFAULTS = {
     'OWNER': ALL,
     'MANAGER': [p for p in ALL if p not in ['settings.manage', 'staff.manage']],

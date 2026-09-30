@@ -1,0 +1,25 @@
+services:
+  backend:
+    environment:
+      COOKIE_SECURE: "true"
+      TRUST_PROXY_HEADERS: "true"
+      SECURE_SSL_REDIRECT: "true"
+      SECURE_HSTS_SECONDS: "31536000"
+      CSRF_TRUSTED_ORIGINS: https://${SHOP_DOMAIN:?Set SHOP_DOMAIN}
+  proxy:
+    image: caddy:2-alpine
+    environment:
+      SHOP_DOMAIN: ${SHOP_DOMAIN:?Set SHOP_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - frontend
+    restart: unless-stopped
+volumes:
+  caddy-data:
+  caddy-config:

@@ -38,19 +38,27 @@ The local database is `backend/db.sqlite3`. Uploaded logos are in `backend/media
 - Customer details, invoice history, payment history, opening balances and due dates.
 - Append-only customer ledger: sale debits, payment credits, adjustments and reversal entries. Balances are computed from entries.
 - Payment allocation to opening/general balances first, then oldest unpaid invoices; overdue balances use unpaid invoices and opening due dates.
-- Printable PDF customer statements and WhatsApp reminder drafts. Users review and send messages themselves.
+- Printable PDF customer statements, reminder drafts, and optional WhatsApp Cloud API template reminders with consent and delivery history.
 - Daily/weekly/monthly date filters, sales vs collections, GST summary, payment-method breakdown, top products, staff/customer totals, current stock alerts and Udhar reports.
 
 ## Financial behavior
 
-- Product selling prices exclude tax. Discounts are fixed invoice amounts applied before tax, distributed across lines in paise using largest remainder. Tax is rounded per line with decimal half-up rounding.
+### Stock units and boxes
+
+In Products, choose Pieces, Kilograms (kg), or Litres (L). Purchase and selling prices are per selected unit. Kg and litre stock, low-stock thresholds and invoice quantities support three decimal places; pieces must be whole numbers.
+
+For pieces, set **Pieces per box** and choose **Boxes** when entering opening stock or adjusting stock. For example, 4 boxes with 12 pieces each adds 48 pieces. Boxes are converted to pieces on the server and recorded in stock history; they are not a separate stock balance. You can also enter loose pieces directly. Inventory shows equivalent full boxes and loose pieces using the current pack size.
+
+Units cannot change after stock history or sales exist. Create a new product when changing the selling unit. Box pack size can change for future deliveries; previous movements retain their recorded conversion in the reason. Billing deducts the selected quantity and full cancellation restores it exactly.
+
+- Product selling prices can include or exclude tax. Inclusive prices are converted to a taxable base before discount. Discounts are fixed invoice amounts applied before tax, distributed across lines in paise using largest remainder. Tax is rounded per line with decimal half-up rounding.
 - Invoice prices, taxes, names and business details are saved as snapshots.
 - Customer invoices create a debit for the entire total. Cash/UPI/card payments create matching credits. Full cash sales therefore leave zero debt.
 - A partial payment records only the amount received; the remainder stays in the ledger. Later collections settle oldest balances.
 - Credit adjustments can reduce opening/general balances. To reverse a sale, use invoice voiding.
 - Voiding restores stock once, reverses the invoice ledger, and records a refund for payments allocated to that invoice. **The application records refunds; it does not move money.** Staff must return funds using the selected method.
 - Sales reports exclude void invoices based on the original sale date. Collections are receipts less refunds based on payment date. Historical sales totals can change after a void. Current outstanding is all-time.
-- GST support is a configurable product-rate calculation and summary. This release does not implement GST return filing, e-invoicing, HSN/SAC, place-of-supply rules, or CGST/SGST/IGST splitting.
+- Domestic retail GST supports HSN, units, place of supply, CGST/SGST/UTGST/IGST, full-cancellation credit notes and a dated GST register. GST return filing, e-invoicing and special tax regimes remain outside this release.
 - Payments and invoices require request UUIDs. Retries reuse the same UUID and payload, preventing duplicate writes.
 - All financial writes run in a database transaction. The shop row serializes writes; SQLite uses IMMEDIATE transactions. Keep this SQLite installation to one shop on one host. Migration to a server database requires running the concurrency suite for that database.
 - Products/customers are archived; their historical records are retained. Staff are disabled rather than deleted. Invoice and ledger deletion APIs are intentionally absent.
@@ -86,7 +94,7 @@ For production, set `DEBUG=false`, a random `SECRET_KEY`, exact `ALLOWED_HOSTS`,
 
 Dockerfiles and Compose provide an optional single-host deployment. Copy .env.example to .env, configure values, and run `docker compose up --build`. Expose the frontend through your HTTPS reverse proxy; keep the backend private. Persist the shop-data volume. Local HTTP Docker testing requires `COOKIE_SECURE=false`; use secure cookies in production.
 
-The setup endpoint is available only until the first owner exists. Complete setup on a private local deployment before exposing it to other users. Configure production HTTPS, monitoring, backups, and login-rate-limit storage for your deployment before using real shop data.
+The setup endpoint is available only until the first owner exists. Complete setup on a private local deployment before exposing it to other users. Login throttling uses the shared database cache. Configure production HTTPS, monitoring and off-machine backups before using real shop data.
 
 ## Repository
 
@@ -100,3 +108,7 @@ The setup endpoint is available only until the first owner exists. Complete setu
 - `md/PROJECT_AUDIT_REPORT.md`: audit of the original incomplete checkout, retained as historical context.
 
 The original empty backend gitlink has been replaced by ordinary source files. No remote backend source was available to recover.
+
+## Razorpay, WhatsApp, GST and deployment additions
+
+See [activation and operations guide](md/GST_AND_INTEGRATIONS.md) for provider environment variables, signed webhooks, approved reminder templates, payment reconciliation, encrypted backups, thermal PDFs and optional Caddy HTTPS setup. Integrations default to disabled. Live providers and deployment require your account configuration.

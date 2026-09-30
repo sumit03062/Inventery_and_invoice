@@ -1,0 +1,10 @@
+'use client';
+import {useData,Panel,Status} from '@/components/ui';
+import {currency,dateTime} from '@/lib/api';
+interface Config {razorpay_ready:boolean;whatsapp_ready:boolean;razorpay_mode:string;whatsapp_template:string;reminder_interval_hours:number;automatic_reminders:boolean}
+interface Receipt {id:number;provider_payment_id:string;amount:string;status:string;detail:string;created_at:string;link__invoice__number:string}
+export default function IntegrationSettings(){
+ const config=useData<Config>('/integrations/'); const receipts=useData<Receipt[]>('/integrations/receipts/');
+ return <Panel title="Payments & WhatsApp"><Status loading={config.isLoading} error={config.error} retry={config.refetch}/>{config.data&&<><div className="total-row"><span>Razorpay</span><strong>{config.data.razorpay_ready?'Connected · '+config.data.razorpay_mode:'Not configured'}</strong></div><div className="total-row"><span>WhatsApp Cloud API</span><strong>{config.data.whatsapp_ready?'Configured':'Not configured'}</strong></div><p className="muted">WhatsApp template: {config.data.whatsapp_template||'Not set'}. Minimum reminder interval: {config.data.reminder_interval_hours} hours. Automatic reminders: {config.data.automatic_reminders?'enabled':'disabled'}.</p><p className="notice">Create payment links from an unpaid invoice. Send WhatsApp reminders from a customer ledger after recording consent. Provider credentials are configured securely on the server.</p></>}
+ <h3>Gateway reconciliation</h3><Status loading={receipts.isLoading} error={receipts.error} retry={receipts.refetch}/><div className="table-wrap"><table><thead><tr><th>Payment</th><th>Invoice</th><th>Amount</th><th>Status</th><th>Details</th></tr></thead><tbody>{receipts.data?.map(r=><tr key={r.id}><td>{r.provider_payment_id}<small>{dateTime(r.created_at)}</small></td><td>{r.link__invoice__number}</td><td>{currency(r.amount)}</td><td>{r.status}</td><td>{r.detail||'Applied to invoice ledger'}</td></tr>)}</tbody></table></div>{receipts.data?.length===0&&<p className="muted">No verified online payments yet.</p>}</Panel>;
+}

@@ -1,5 +1,6 @@
 """Printable documents use saved invoice snapshots and a full customer ledger."""
 from io import BytesIO
+from pathlib import Path
 from xml.sax.saxutils import escape
 from django.http import HttpResponse
 from django.core.files.storage import default_storage
@@ -9,14 +10,21 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.lib.pagesizes import A4
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 from rest_framework.decorators import api_view
-from .models import Shop, Invoice, Customer
+from .models import Shop, Invoice, Customer, CreditNote
 from .services import ZERO, invoice_due
+from .tax import STATES
 
 STYLES = getSampleStyleSheet()
 STYLES['Normal'].fontSize = 9
 STYLES['Normal'].leading = 13
+pdfmetrics.registerFont(TTFont('Shopbook', str(Path(__file__).parent / 'fonts' / 'NotoSansDevanagari.ttf'), shapable=True))
+for _style in STYLES.byName.values():
+    _style.fontName = 'Shopbook'
+    _style.shaping = True
 
 
 def p(value, style='Normal'):
@@ -33,13 +41,14 @@ def table(rows, widths):
     return result
 
 
-def document(elements, filename):
+def document(elements, filename, thermal=False):
     stream = BytesIO()
     def footer(canvas, doc):
         canvas.setFont('Helvetica', 8)
-        canvas.drawString(18 * mm, 12 * mm, 'Amounts in INR (Rs.)')
-        canvas.drawRightString(192 * mm, 12 * mm, f'Page {doc.page}')
-    doc = SimpleDocTemplate(stream, pagesize=A4, rightMargin=18*mm, leftMargin=18*mm, topMargin=18*mm, bottomMargin=22*mm, title=filename)
+        canvas.drawString((5 if thermal else 18) * mm, 8 * mm, f'INR (Rs.) | Page {doc.page}')
+    margin = (5 if thermal else 18)*mm
+    doc = SimpleDocTemplate(stream, pagesize=(80*mm,297*mm) if thermal else A4,
+        rightMargin=margin, leftMargin=margin, topMargin=margin, bottomMargin=16*mm, title=filename)
     doc.build(elements, onFirstPage=footer, onLaterPages=footer)
     response = HttpResponse(stream.getvalue(), content_type='application/pdf')
     response['Content-Disposition'] = f'inline; filename="{filename}.pdf"'
@@ -49,6 +58,16 @@ def document(elements, filename):
 @api_view(['GET'])
 def invoice_pdf(request, pk):
     inv = get_object_or_404(Invoice, pk=pk)
+    return invoice_document(inv, thermal=request.query_params.get('layout') == 'thermal')
+
+
+@api_view(['GET'])
+def credit_note_pdf(request, pk):
+    note = get_object_or_404(CreditNote.objects.select_related('invoice'), invoice_id=pk)
+    return invoice_document(note.invoice, credit_note=note, thermal=request.query_params.get('layout') == 'thermal')
+
+
+def invoice_document(inv, credit_note=None, thermal=False):
     shop = inv.shop_snapshot
     elements = []
     if shop.get('logo'):
@@ -61,23 +80,42 @@ def invoice_pdf(request, pk):
             pass
     elements += [p(shop['name'], 'Title'), p(shop.get('address', '')),
         p(f"Phone: {shop.get('phone', '')} | GSTIN: {shop.get('gstin') or 'Not provided'}"), Spacer(1, 14),
-        p(f"{'VOID - ' if inv.status == 'VOID' else ''}Invoice {inv.number}", 'Heading1'),
+        p(f'Credit note {credit_note.number}' if credit_note else f"{'VOID - ' if inv.status == 'VOID' else ''}Invoice {inv.number}", 'Heading2' if thermal else 'Heading1'),
         p(f'Date: {timezone.localtime(inv.created_at):%d %b %Y, %I:%M %p} | Due: {inv.due_date:%d %b %Y}'),
         p(f"Bill to: {inv.customer_snapshot.get('name', 'Walk-in customer')}"),
         p(inv.customer_snapshot.get('address', '')),
         p(f"Phone: {inv.customer_snapshot.get('phone', '')} | GSTIN: {inv.customer_snapshot.get('gstin') or '-'}"), Spacer(1, 14)]
-    rows = [['Product / SKU', 'Qty', 'Rate', 'Discount', 'GST %', 'Tax', 'Total']]
+    if credit_note:
+        elements += [p(f'Original invoice: {inv.number}'), p(f'Credit note date: {timezone.localtime(credit_note.created_at):%d %b %Y}'), p('Reason: '+credit_note.reason)]
+    if inv.place_of_supply:
+        elements += [p(f'Place of supply: {inv.place_of_supply} - {STATES.get(inv.place_of_supply, "")}')]
+    if shop.get('gst_mode') == 'DOMESTIC':
+        elements += [p('Reverse charge: No | Domestic retail goods')]
+    rows = [['Item', 'Total']] if thermal else [['Product / HSN / unit', 'Qty', 'Rate', 'Discount', 'GST %', 'Tax', 'Total']]
     for item in inv.items.all():
-        rows.append([f'{item.name}\n{item.sku}', item.quantity, item.price, item.discount, item.gst_percent, item.tax, item.total])
-    elements += [table(rows, [155, 30, 57, 58, 40, 65, 88]), Spacer(1, 14),
+        label = f'{item.name}\n{item.sku} | HSN {item.hsn_code or "-"} | {item.unit}'
+        if item.price_includes_tax:
+            label += '\nRate includes GST'
+        if thermal:
+            rows.append([f'{label}\n{item.quantity} x {item.price}\nDiscount {item.discount}; GST {item.gst_percent}%: {item.tax}', item.total])
+        else:
+            rows.append([label, item.quantity, item.price, item.discount, item.gst_percent, item.tax, item.total])
+    elements += [table(rows, [140,46] if thermal else [148, 27, 57, 58, 47, 65, 91]), Spacer(1, 14),
         p(f'Subtotal: Rs. {inv.subtotal} | Discount: Rs. {inv.discount} | GST: Rs. {inv.gst_amount}'),
-        p(f'Grand total: Rs. {inv.grand_total}', 'Heading2'),
-        p(f'Outstanding on this invoice: Rs. {invoice_due(inv)}'),
+        p(f'{"Credit total" if credit_note else "Grand total"}: Rs. {inv.grand_total}', 'Heading2'),
+        p(f'Taxable value: Rs. {inv.subtotal-inv.discount}'),
         p(f'Payment type: {inv.payment_method} | Issued by: {inv.created_by.username}'),
         p(inv.notes), Spacer(1, 16), p(shop.get('invoice_footer', ''))]
+    if not credit_note:
+        elements += [p(f'Outstanding on this invoice: Rs. {invoice_due(inv)}')]
+    for component in ['cgst','sgst','utgst','igst']:
+        if getattr(inv, component):
+            elements += [p(f'{component.upper()}: Rs. {getattr(inv, component)}')]
+    if shop.get('gst_mode') == 'DOMESTIC':
+        elements += [Spacer(1,12), p('Authorized signatory: __________________')]
     if inv.status == 'VOID':
         elements += [p(f'Voided: {inv.void_reason}')]
-    return document(elements, inv.number)
+    return document(elements, credit_note.number if credit_note else inv.number, thermal=thermal)
 
 
 @api_view(['GET'])

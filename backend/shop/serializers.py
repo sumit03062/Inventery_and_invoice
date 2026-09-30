@@ -4,7 +4,8 @@ from django.utils import timezone
 from rest_framework import serializers
 from .models import Shop, Product, Customer, Category, Invoice, InvoiceItem, Payment, LedgerEntry, StockMovement, Activity
 from .permissions import permissions_for
-from .services import balance, invoice_due, ZERO
+from .services import balance, invoice_due, ZERO, quantity
+from .tax import validate_state
 
 
 def validate_gstin(value):
@@ -18,9 +19,20 @@ class ShopSerializer(serializers.ModelSerializer):
     class Meta:
         model = Shop
         exclude = ['revision']
-        read_only_fields = ['id']
+        read_only_fields = ['id', 'next_credit_number']
 
     validate_gstin = staticmethod(validate_gstin)
+    validate_state_code = staticmethod(validate_state)
+
+    def validate(self, data):
+        mode = data.get('gst_mode', getattr(self.instance, 'gst_mode', 'BASIC'))
+        gstin = data.get('gstin', getattr(self.instance, 'gstin', ''))
+        state = data.get('state_code', getattr(self.instance, 'state_code', ''))
+        if gstin and state and gstin[:2] != state:
+            raise serializers.ValidationError('GSTIN prefix must match the shop state code.')
+        if mode == 'DOMESTIC' and (not gstin or not state or not data.get('address', getattr(self.instance, 'address', ''))):
+            raise serializers.ValidationError('Domestic GST requires shop GSTIN, state and address.')
+        return data
 
     def validate_invoice_prefix(self, value):
         if not re.fullmatch(r'[A-Za-z0-9-]{1,20}', value):
@@ -51,6 +63,9 @@ class ShopSerializer(serializers.ModelSerializer):
 
 
 class ProductSerializer(serializers.ModelSerializer):
+    stock_quantity = serializers.DecimalField(max_digits=15, decimal_places=3, read_only=True, coerce_to_string=False)
+    low_stock_threshold = serializers.DecimalField(max_digits=15, decimal_places=3, min_value=0, required=False, coerce_to_string=False)
+
     is_low_stock = serializers.SerializerMethodField()
     category_name = serializers.CharField(source='category.name', read_only=True, default='')
 
@@ -63,6 +78,25 @@ class ProductSerializer(serializers.ModelSerializer):
         return obj.stock_quantity <= obj.low_stock_threshold
 
     def validate(self, data):
+        unit = data.get('unit', getattr(self.instance, 'unit', 'PCS'))
+        if unit not in ['PCS', 'KG', 'LTR'] and (not self.instance or unit != self.instance.unit):
+            raise serializers.ValidationError({'unit': 'Choose pieces, kg or litres.'})
+        if self.instance and unit != self.instance.unit and (self.instance.stock_quantity or self.instance.movements.exists() or self.instance.invoiceitem_set.exists()):
+            raise serializers.ValidationError({'unit': 'Unit cannot change after stock movements or sales. Create a new product for a different unit.'})
+        quantity(data.get('low_stock_threshold', getattr(self.instance, 'low_stock_threshold', 5)), unit, minimum=0)
+        tracking = data.get('tracking', getattr(self.instance,'tracking','NONE'))
+        if tracking=='SERIAL' and unit!='PCS':
+            raise serializers.ValidationError('Serial tracking requires pieces.')
+        if data.get('warranty_days',0)>36500:
+            raise serializers.ValidationError('Warranty cannot exceed 100 years.')
+        if self.instance and tracking!=self.instance.tracking and (self.instance.stock_quantity or self.instance.movements.exists()):
+            raise serializers.ValidationError('Tracking cannot change after stock has been recorded.')
+        pieces = data.get('pieces_per_box', getattr(self.instance, 'pieces_per_box', 1))
+        if not 1 <= pieces <= 1000000:
+            raise serializers.ValidationError({'pieces_per_box': 'Use 1 to 1,000,000 pieces per box.'})
+        hsn = data.get('hsn_code', '')
+        if hsn and not re.fullmatch(r'(?:\d{4}|\d{6}|\d{8})', hsn):
+            raise serializers.ValidationError({'hsn_code': 'Enter 4, 6 or 8 digits.'})
         for field in ['purchase_price', 'price', 'gst_percent']:
             if data.get(field, 0) < 0:
                 raise serializers.ValidationError({field: 'Cannot be negative.'})
@@ -80,6 +114,8 @@ class ProductSerializer(serializers.ModelSerializer):
 
 
 class CustomerSerializer(serializers.ModelSerializer):
+    credit_limit = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0, allow_null=True, required=False)
+
     outstanding = serializers.SerializerMethodField()
     total_purchases = serializers.SerializerMethodField()
     overdue = serializers.SerializerMethodField()
@@ -87,9 +123,25 @@ class CustomerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Customer
         fields = '__all__'
-        read_only_fields = ['active', 'created_at']
+        read_only_fields = ['active', 'created_at', 'whatsapp_consent_at']
 
     validate_gstin = staticmethod(validate_gstin)
+    validate_state_code = staticmethod(validate_state)
+
+    def validate(self, data):
+        gstin = data.get('gstin', getattr(self.instance, 'gstin', ''))
+        state = data.get('state_code', getattr(self.instance, 'state_code', ''))
+        if gstin and state and gstin[:2] != state:
+            raise serializers.ValidationError('GSTIN prefix must match the customer state code.')
+        consent = data.get('whatsapp_consent', getattr(self.instance, 'whatsapp_consent', False))
+        if consent and not data.get('whatsapp_consent_note', getattr(self.instance, 'whatsapp_consent_note', '')):
+            raise serializers.ValidationError('Record when/how the customer agreed to WhatsApp payment reminders.')
+        if self.instance and data.get('phone', self.instance.phone) != self.instance.phone:
+            data['whatsapp_consent'] = False
+            data['whatsapp_consent_at'] = None
+        elif 'whatsapp_consent' in data:
+            data['whatsapp_consent_at'] = timezone.now() if consent else None
+        return data
 
     def validate_phone(self, value):
         if not re.fullmatch(r'\+?[0-9 ()-]{7,20}', value):
@@ -112,15 +164,25 @@ class CustomerSerializer(serializers.ModelSerializer):
 
 
 class ItemSerializer(serializers.ModelSerializer):
+    returned_quantity = serializers.SerializerMethodField()
+    def get_returned_quantity(self,obj):
+        return obj.returns.aggregate(v=Sum('quantity'))['v'] or 0
+
+    quantity = serializers.DecimalField(max_digits=15, decimal_places=3, read_only=True, coerce_to_string=False)
     class Meta:
         model = InvoiceItem
         exclude = ['purchase_price', 'invoice']
 
 
 class InvoiceSerializer(serializers.ModelSerializer):
+    returned_total = serializers.SerializerMethodField()
+    def get_returned_total(self,obj):
+        return str(obj.returns.aggregate(v=Sum('total'))['v'] or 0)
+
     items = ItemSerializer(many=True, read_only=True)
     outstanding = serializers.SerializerMethodField()
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
+    credit_note_number = serializers.CharField(source='credit_note.number', read_only=True, default='')
 
     class Meta:
         model = Invoice
@@ -150,6 +212,10 @@ class LedgerSerializer(serializers.ModelSerializer):
 
 
 class MovementSerializer(serializers.ModelSerializer):
+    quantity = serializers.DecimalField(max_digits=15, decimal_places=3, read_only=True, coerce_to_string=False)
+    balance_after = serializers.DecimalField(max_digits=15, decimal_places=3, read_only=True, coerce_to_string=False)
+    unit = serializers.CharField(source='product.unit', read_only=True)
+
     product_name = serializers.CharField(source='product.name', read_only=True)
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
 

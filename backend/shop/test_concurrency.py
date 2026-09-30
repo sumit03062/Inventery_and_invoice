@@ -3,6 +3,10 @@ import uuid
 import sqlite3
 import tempfile
 import zipfile
+import os
+from unittest.mock import patch
+from cryptography.fernet import Fernet
+from django.core.management.base import CommandError
 from contextlib import closing
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
@@ -68,3 +72,21 @@ class ConcurrentBillingTests(TransactionTestCase):
             with closing(sqlite3.connect(str(Path(folder) / 'db.sqlite3'))) as restored:
                 self.assertEqual(restored.execute('pragma integrity_check').fetchone()[0], 'ok')
                 self.assertEqual(restored.execute('select stock_quantity from shop_product').fetchone()[0], 1)
+
+    def test_encrypted_backup_roundtrip_and_wrong_key(self):
+        with tempfile.TemporaryDirectory() as folder:
+            encrypted = Path(folder) / 'backup.enc'
+            output = Path(folder) / 'restored.zip'
+            with patch.dict(os.environ, {'BACKUP_ENCRYPTION_KEY': Fernet.generate_key().decode()}):
+                call_command('backup_shop', output=str(encrypted), encrypt=True, verbosity=0)
+                self.assertFalse(zipfile.is_zipfile(encrypted))
+                call_command('decrypt_backup', input=str(encrypted), output=str(output), verbosity=0)
+            with zipfile.ZipFile(output) as archive:
+                archive.extract('db.sqlite3', folder)
+            with closing(sqlite3.connect(str(Path(folder) / 'db.sqlite3'))) as restored:
+                self.assertEqual(restored.execute('pragma integrity_check').fetchone()[0], 'ok')
+                self.assertEqual(restored.execute('select stock_quantity from shop_product').fetchone()[0], 1)
+            with patch.dict(os.environ, {'BACKUP_ENCRYPTION_KEY': Fernet.generate_key().decode()}):
+                with self.assertRaises(CommandError):
+                    call_command('decrypt_backup', input=str(encrypted), output=str(Path(folder)/'bad.zip'))
+            self.assertFalse((Path(folder)/'bad.zip').exists())

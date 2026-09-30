@@ -9,7 +9,8 @@ from django.db.models import F, Sum
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime, parse_date
 from rest_framework.exceptions import ValidationError
-from .models import Shop, Product, Customer, Invoice, InvoiceItem, LedgerEntry, Payment, StockMovement, Activity
+from .models import Shop, Product, Customer, Invoice, InvoiceItem, LedgerEntry, Payment, StockMovement, Activity, CreditNote
+from .tax import validate_state, tax_parts
 from .permissions import require
 
 ZERO = Decimal('0.00')
@@ -33,6 +34,31 @@ def integer(value, minimum=1, maximum=1000000):
         return parsed
     except (ValueError, TypeError):
         raise ValidationError(f'Enter a whole number between {minimum} and {maximum}.')
+
+
+def quantity(value, unit=None, minimum=Decimal('.001'), maximum=Decimal('1000000')):
+    try:
+        number = Decimal(str(value))
+        if not number.is_finite() or not minimum <= number <= maximum or number != number.quantize(Decimal('.001')):
+            raise InvalidOperation
+        if unit and unit not in ['KG', 'LTR'] and number != number.to_integral_value():
+            raise ValidationError('Pieces must be a whole number. Use kg or litres for decimal quantities.')
+        return number
+    except (InvalidOperation, ValueError, TypeError):
+        raise ValidationError(f'Enter a quantity between {minimum} and {maximum}, with up to 3 decimal places.')
+
+
+def stock_input(data, product, field='quantity', opening=False):
+    mode = data.get('stock_mode', 'DIRECT')
+    if mode not in ['DIRECT', 'BOX']:
+        raise ValidationError('Choose direct quantity or boxes.')
+    if mode == 'BOX':
+        if product.unit != 'PCS':
+            raise ValidationError('Box entry is available only for products measured in pieces.')
+        boxes = integer(data.get('boxes'), minimum=0 if opening else -1000000)
+        amount = quantity(boxes * product.pieces_per_box, 'PCS', minimum=0 if opening else -1000000)
+        return amount, f' ({boxes} boxes x {product.pieces_per_box} pieces)'
+    return quantity(data.get(field, 0), product.unit, minimum=0 if opening else -1000000), ''
 
 
 def request_key(data):
@@ -83,6 +109,8 @@ def entry(customer, amount, kind, user, description, invoice=None, payment=None,
 
 def stock(product, quantity, user, reason, invoice=None, key=None):
     after = product.stock_quantity + quantity
+    if after > Decimal('999999999999.999'):
+        raise ValidationError('Stock exceeds the supported maximum.')
     if after < 0:
         raise ValidationError(f'Insufficient stock for {product.name}. Available: {product.stock_quantity}.')
     product.stock_quantity = after
@@ -123,11 +151,15 @@ def create_invoice(user, data):
         if not isinstance(line, dict):
             raise ValidationError('Each item must contain a product and quantity.')
         pid = integer(line.get('product_id'))
-        quantities[pid] = quantities.get(pid, 0) + integer(line.get('quantity'))
+        quantities[pid] = quantities.get(pid, 0) + quantity(line.get('quantity'))
     products = list(Product.objects.select_for_update().filter(id__in=quantities, active=True).order_by('id'))
     if len(products) != len(quantities):
         raise ValidationError('One or more products are unavailable.')
+    units = {p.id: p.unit for p in products}
+    for line in lines:
+        quantity(line.get('quantity'), units[integer(line.get('product_id'))])
     for p in products:
+        quantity(quantities[p.id], p.unit)
         if quantities[p.id] > p.stock_quantity:
             raise ValidationError(f'Insufficient stock for {p.name}. Available: {p.stock_quantity}.')
     customer = None
@@ -135,7 +167,20 @@ def create_invoice(user, data):
         customer = Customer.objects.filter(pk=integer(data['customer_id']), active=True).first()
         if not customer:
             raise ValidationError('Select an active customer.')
-    bases = [money(p.price * quantities[p.id]) for p in products]
+    destination = str(data.get('place_of_supply') or (customer.state_code if customer else '') or shop.state_code)
+    validate_state(destination)
+    if shop.gst_mode == 'DOMESTIC':
+        if not shop.state_code or not shop.gstin or not destination:
+            raise ValidationError('Configure shop GSTIN/state and choose the place of supply.')
+        if any(not p.hsn_code for p in products):
+            raise ValidationError('Set an HSN/SAC code for every product before domestic GST billing.')
+        if len(f'{shop.invoice_prefix}-{shop.next_invoice_number:06d}') > 16:
+            raise ValidationError('GST invoice numbers must fit 16 characters. Shorten the invoice prefix.')
+        if customer and customer.gstin and not customer.address:
+            raise ValidationError('Add the registered customer address before billing.')
+    rates = [p.gst_percent if shop.tax_enabled else ZERO for p in products]
+    bases = [money(p.price * quantities[p.id] / (1 + rate / 100)) if p.price_includes_tax
+             else money(p.price * quantities[p.id]) for p, rate in zip(products, rates)]
     subtotal = money(sum(bases, ZERO))
     discount = money(data.get('discount', 0))
     if discount < 0 or discount > subtotal:
@@ -143,16 +188,40 @@ def create_invoice(user, data):
     if discount:
         require(user, 'billing.discount')
     discounts = discount_shares(bases, discount)
-    taxes = [money((base - share) * (p.gst_percent if shop.tax_enabled else ZERO) / 100)
-             for p, base, share in zip(products, bases, discounts)]
+    calculated = [tax_parts(base - share, rate, shop.gst_mode, shop.state_code, destination)
+                  for rate, base, share in zip(rates, bases, discounts)]
+    taxes = [row[0] for row in calculated]
     tax = money(sum(taxes, ZERO))
     total = money(subtotal - discount + tax)
-    method = payment_method(data, shop)
-    paid = money(data.get('paid_amount', 0 if method == 'CREDIT' else total))
+    splits = data.get('payments')
+    if splits is not None:
+        if not isinstance(splits, list) or not 1 <= len(splits) <= 3:
+            raise ValidationError('Supply one to three payment amounts.')
+        receipts = []
+        used = set()
+        for part in splits:
+            if not isinstance(part, dict):
+                raise ValidationError('Invalid payment split.')
+            pay_method = payment_method({'payment_method': part.get('method')}, shop)
+            amount = money(part.get('amount'))
+            if pay_method == 'CREDIT' or pay_method in used or amount <= 0:
+                raise ValidationError('Use each collection method once with a positive amount.')
+            used.add(pay_method)
+            receipts.append((pay_method, amount))
+        paid = sum((amount for _, amount in receipts), ZERO)
+        method = 'MIXED' if len(receipts) > 1 else receipts[0][0]
+    else:
+        method = payment_method(data, shop)
+        paid = money(data.get('paid_amount', 0 if method == 'CREDIT' else total))
+        receipts = [(method, paid)] if paid else []
     if paid < 0 or paid > total or (method == 'CREDIT' and paid != 0):
-        raise ValidationError('Payment must be between zero and total. Select a collection method for a partial payment.')
+        raise ValidationError('Payment must be between zero and total.')
     if paid < total and not customer:
         raise ValidationError('Select a customer for Udhar or a partial payment.')
+    if customer and customer.credit_limit is not None and paid < total and balance(customer) + total - paid > customer.credit_limit:
+        if user.profile.role != 'OWNER' or not str(data.get('credit_override_reason', '')).strip():
+            raise ValidationError('Customer credit limit exceeded. The owner must approve with a reason or collect more payment.')
+        audit(user, 'CREDIT_LIMIT_OVERRIDE', f'{customer.id}: {data["credit_override_reason"]}')
     due = timezone.localdate() + timedelta(days=shop.credit_days)
     if data.get('due_date'):
         try:
@@ -161,27 +230,36 @@ def create_invoice(user, data):
             due = None
         if not due or due < timezone.localdate():
             raise ValidationError('Due date must be today or later.')
+    if shop.gst_mode == 'DOMESTIC' and total >= 50000 and (not customer or not customer.address):
+        raise ValidationError('Add customer name and address for invoices of Rs. 50,000 or more.')
     invoice = Invoice.objects.create(number=f'{shop.invoice_prefix}-{shop.next_invoice_number:06d}',
         request_key=key, request_hash=digest, customer=customer,
         customer_snapshot={k: getattr(customer, k) for k in ['name', 'phone', 'address', 'gstin']} if customer else {'name': 'Walk-in customer'},
-        shop_snapshot={**{k: getattr(shop, k) for k in ['name', 'owner_name', 'address', 'phone', 'gstin', 'invoice_footer']}, 'logo': shop.logo.name if shop.logo else ''},
+        shop_snapshot={**{k: getattr(shop, k) for k in ['name', 'owner_name', 'address', 'phone', 'gstin', 'invoice_footer', 'state_code', 'gst_mode']}, 'logo': shop.logo.name if shop.logo else ''},
         subtotal=subtotal, discount=discount, gst_amount=tax, grand_total=total,
+        place_of_supply=destination, **{field: sum((row[1][field] for row in calculated), ZERO) for field in ['cgst','sgst','utgst','igst']},
         payment_method=method, due_date=due, created_by=user, notes=str(data.get('notes', ''))[:1000])
     shop.next_invoice_number += 1
     shop.save(update_fields=['next_invoice_number'])
-    for p, base, share, line_tax in zip(products, bases, discounts, taxes):
-        InvoiceItem.objects.create(invoice=invoice, product=p, name=p.name, sku=p.sku,
+    for p, base, share, (line_tax, parts) in zip(products, bases, discounts, calculated):
+        item = InvoiceItem.objects.create(invoice=invoice, product=p, name=p.name, sku=p.sku,
             quantity=quantities[p.id], price=p.price, purchase_price=p.purchase_price,
+            hsn_code=p.hsn_code, unit=p.unit, price_includes_tax=p.price_includes_tax, taxable_value=base-share, **parts,
             gst_percent=p.gst_percent if shop.tax_enabled else ZERO,
             discount=share, tax=line_tax, total=base - share + line_tax)
+        from .tracking import sell
+        matching = [line for line in lines if integer(line['product_id']) == p.id]
+        if p.tracking == 'SERIAL' and len(matching) != 1:
+            raise ValidationError('Combine serial-tracked products into one line.')
+        sell(item, matching[0])
         stock(p, -quantities[p.id], user, f'Sale {invoice.number}', invoice)
     if customer:
         entry(customer, total, 'CREDIT', user, f'Invoice {invoice.number}', invoice)
-    if paid:
-        receipt = Payment.objects.create(customer=customer, invoice=invoice, amount=paid,
-            method=method, created_by=user, note=f'Payment for {invoice.number}')
+    for receipt_method, receipt_amount in receipts:
+        receipt = Payment.objects.create(customer=customer, invoice=invoice, amount=receipt_amount,
+            method=receipt_method, created_by=user, note=f'Payment for {invoice.number}')
         if customer:
-            entry(customer, -paid, 'PAYMENT', user, receipt.note, invoice, receipt)
+            entry(customer, -receipt_amount, 'PAYMENT', user, receipt.note, invoice, receipt)
     audit(user, 'INVOICE_CREATED', invoice.number)
     return invoice
 
@@ -248,6 +326,8 @@ def void_invoice(user, invoice_id, data):
     inv = Invoice.objects.select_for_update().get(pk=invoice_id)
     if inv.status == 'VOID':
         return inv
+    if inv.returns.exists():
+        raise ValidationError('This invoice has partial returns. Return the remaining items instead of voiding it.')
     reason = str(data.get('reason', '')).strip()
     if len(reason) < 3:
         raise ValidationError('Give a reason for voiding this invoice.')
@@ -263,8 +343,14 @@ def void_invoice(user, invoice_id, data):
     if inv.customer:
         entry(inv.customer, -inv.grand_total, 'REVERSAL', user, f'Void {inv.number}: {reason}', inv)
     for item in inv.items.select_related('product'):
+        from .tracking import restore
+        restore(item, item.quantity)
         stock(item.product, item.quantity, user, f'Void {inv.number}', inv)
     inv.status, inv.void_reason, inv.voided_at = 'VOID', reason[:500], timezone.now()
     inv.save(update_fields=['status', 'void_reason', 'voided_at'])
+    CreditNote.objects.create(number=f'CN-{shop.next_credit_number:06d}', invoice=inv,
+        reason=reason[:500], amount=inv.grand_total, created_by=user)
+    shop.next_credit_number += 1
+    shop.save(update_fields=['next_credit_number'])
     audit(user, 'INVOICE_VOIDED', f'{inv.number}: {reason}')
     return inv

@@ -26,6 +26,18 @@ from . import services as svc
 User = get_user_model()
 
 
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def health(request):
+    from django.db import connection
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT 1')
+        return Response({'status':'ok'})
+    except Exception:
+        return Response({'status':'unavailable'},status=503)
+
+
 class LoginThrottle(AnonRateThrottle):
     rate = '20/minute'
 
@@ -152,9 +164,11 @@ def products(request):
             serializer = ProductSerializer(data=request.data, context={'request': request})
             serializer.is_valid(raise_exception=True)
             obj = serializer.save()
-            opening = svc.integer(request.data.get('opening_stock', 0), minimum=0)
+            opening, detail = svc.stock_input(request.data, obj, 'opening_stock', opening=True)
+            if opening and obj.tracking!='NONE':
+                raise ValidationError('For tracked products, start at zero and receive stock with batch or serial details.')
             if opening:
-                svc.stock(obj, opening, request.user, 'Opening stock')
+                svc.stock(obj, opening, request.user, 'Opening stock' + detail)
             svc.audit(request.user, 'PRODUCT_CREATED', obj.name)
         return Response(ProductSerializer(obj, context={'request': request}).data, status=201)
     qs = Product.objects.filter(active=True).select_related('category').order_by('name')
@@ -177,7 +191,7 @@ def product_detail(request, pk):
         obj.save(update_fields=['active'])
         svc.audit(request.user, 'PRODUCT_ARCHIVED', obj.name)
         return Response(status=204)
-    if any(key in request.data for key in ['price', 'purchase_price', 'gst_percent']):
+    if any(key in request.data for key in ['price', 'purchase_price', 'gst_percent', 'price_includes_tax']):
         require(request.user, 'prices.write')
     serializer = ProductSerializer(obj, data=request.data, partial=True, context={'request': request})
     serializer.is_valid(raise_exception=True)
@@ -193,8 +207,13 @@ def adjust_stock(request, pk):
     svc.lock_shop()
     obj = get_object_or_404(Product, pk=pk, active=True)
     key = svc.request_key(request.data)
-    quantity = svc.integer(request.data.get('quantity'), minimum=-1000000)
+    if obj.tracking!='NONE':
+        raise ValidationError('Use tracked stock receipt or wastage for this product.')
+    quantity, detail = svc.stock_input(request.data, obj)
     reason = str(request.data.get('reason', '')).strip()
+    if len(reason) < 3 or len(reason) + len(detail) > 500:
+        raise ValidationError('Enter a reason between 3 and 450 characters.')
+    reason += detail
     existing = StockMovement.objects.filter(request_key=key).first()
     if existing:
         if existing.product_id != pk or existing.quantity != quantity or existing.reason != reason or existing.created_by_id != request.user.id:
@@ -203,7 +222,7 @@ def adjust_stock(request, pk):
     if not quantity or len(reason) < 3 or len(reason) > 500:
         raise ValidationError('Enter a nonzero stock change and a reason (3–500 characters).')
     svc.stock(obj, quantity, request.user, reason, key=key)
-    svc.audit(request.user, 'STOCK_ADJUSTED', f'{obj.name}: {quantity:+d}, {reason}')
+    svc.audit(request.user, 'STOCK_ADJUSTED', f'{obj.name}: {quantity:+f}, {reason}')
     return Response(ProductSerializer(obj, context={'request': request}).data)
 
 
@@ -218,6 +237,8 @@ def stock_history(request):
 @api_view(['GET', 'POST'])
 def customers(request):
     if request.method == 'POST':
+        if request.data.get('credit_limit') is not None and request.user.profile.role != 'OWNER':
+            raise PermissionDenied('Only the owner can set credit limits.')
         require(request.user, 'customers.write')
         with transaction.atomic():
             svc.lock_shop()
@@ -252,6 +273,8 @@ def customer_detail(request, pk):
             'invoices': InvoiceSerializer(obj.invoices.select_related('created_by').prefetch_related('items').order_by('-id'), many=True).data,
             'payments': PaymentSerializer(obj.payments.select_related('customer', 'created_by').order_by('-transaction_date'), many=True).data})
     require(request.user, 'customers.write')
+    if 'credit_limit' in request.data and request.user.profile.role != 'OWNER':
+        raise PermissionDenied('Only the owner can change credit limits.')
     with transaction.atomic():
         svc.lock_shop()
         if request.method == 'DELETE':

@@ -54,3 +54,34 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {'login': '20/minute'},
     'EXCEPTION_HANDLER': 'shop.errors.exception_handler',
 }
+
+# Keep credentials server-side; enabling a provider is an explicit deployment step.
+for _name in ['RAZORPAY_KEY_ID','RAZORPAY_KEY_SECRET','RAZORPAY_WEBHOOK_SECRET',
+              'WHATSAPP_TOKEN','WHATSAPP_PHONE_ID','WHATSAPP_APP_SECRET','WHATSAPP_VERIFY_TOKEN',
+              'WHATSAPP_TEMPLATE','WHATSAPP_GRAPH_VERSION']:
+    globals()[_name] = os.getenv(_name, '')
+RAZORPAY_ENABLED = os.getenv('RAZORPAY_ENABLED', 'false').lower() == 'true'
+WHATSAPP_ENABLED = os.getenv('WHATSAPP_ENABLED', 'false').lower() == 'true'
+WHATSAPP_LANGUAGE = os.getenv('WHATSAPP_LANGUAGE', 'en')
+REMINDER_INTERVAL_HOURS = max(24, int(os.getenv('REMINDER_INTERVAL_HOURS', '72')))
+AUTOMATIC_REMINDERS = os.getenv('AUTOMATIC_REMINDERS', 'false').lower() == 'true'
+CACHES = {'default': {'BACKEND': 'django.core.cache.backends.db.DatabaseCache', 'LOCATION': 'shop_cache'}}
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https') if os.getenv('TRUST_PROXY_HEADERS', 'false').lower() == 'true' else None
+SECURE_SSL_REDIRECT = os.getenv('SECURE_SSL_REDIRECT', 'false').lower() == 'true'
+SECURE_REDIRECT_EXEMPT = [r'^api/health/$']
+SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '0'))
+LOGGING = {'version':1, 'disable_existing_loggers':False,
+    'handlers':{'console':{'class':'logging.StreamHandler'}},
+    'loggers':{'django.request':{'handlers':['console'],'level':'ERROR','propagate':False}}}
+
+PASSWORD_RESET_ENABLED = os.getenv('PASSWORD_RESET_ENABLED', 'false').lower() == 'true'
+PUBLIC_APP_URL = os.getenv('PUBLIC_APP_URL', 'http://127.0.0.1:3001').rstrip('/')
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = os.getenv('EMAIL_HOST', '')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'true').lower() == 'true'
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'shop@example.com')
+EMAIL_TIMEOUT = 10
+PASSWORD_RESET_TIMEOUT = 3600

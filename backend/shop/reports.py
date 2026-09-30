@@ -9,7 +9,7 @@ from django.http import HttpResponse
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
-from .models import Invoice, InvoiceItem, Payment, Product, Customer, LedgerEntry
+from .models import Invoice, InvoiceItem, Payment, Product, Customer, LedgerEntry, CreditNote, SaleReturn
 from .permissions import require
 from .serializers import CustomerSerializer, InvoiceSerializer, PaymentSerializer
 from .services import ZERO, money, balance
@@ -62,22 +62,22 @@ def reports(request):
     invoices = Invoice.objects.filter(status='ACTIVE', created_at__date__range=(start, end))
     payments = Payment.objects.filter(transaction_date__date__range=(start, end))
     methods = []
-    for method in ['CASH', 'UPI', 'CARD']:
+    for method in ['CASH', 'UPI', 'CARD', 'ONLINE']:
         rows = payments.filter(method=method)
         receipts = rows.filter(direction='RECEIPT').aggregate(total=Sum('amount'))['total'] or ZERO
         refunds = rows.filter(direction='REFUND').aggregate(total=Sum('amount'))['total'] or ZERO
         methods.append({'method': method, 'receipts': str(receipts), 'refunds': str(refunds), 'net': str(receipts - refunds)})
-    top = InvoiceItem.objects.filter(invoice__in=invoices).values('product_id', 'name').annotate(quantity=Sum('quantity'), total=Sum('total')).order_by('-quantity')[:20]
+    top = InvoiceItem.objects.filter(invoice__in=invoices).values('product_id', 'name', 'unit').annotate(quantity=Sum('quantity'), total=Sum('total')).order_by('-quantity')[:20]
     staff = invoices.values('created_by__username').annotate(total=Sum('grand_total')).order_by('-total')
     customers = invoices.values('customer_snapshot__name').annotate(total=Sum('grand_total')).order_by('-total')[:30]
     outstanding = CustomerSerializer(Customer.objects.filter(active=True), many=True).data
-    low = Product.objects.filter(active=True, stock_quantity__lte=F('low_stock_threshold')).values('name', 'sku', 'stock_quantity', 'low_stock_threshold')
+    low = Product.objects.filter(active=True, stock_quantity__lte=F('low_stock_threshold')).values('name', 'sku', 'unit', 'stock_quantity', 'low_stock_threshold')
     history = []
     day = start
     while day <= end:
         history.append({'date': day.isoformat(), **totals(day, day)})
         day += timedelta(days=1)
-    return Response({'from': start, 'to': end, 'stats': totals(start, end), 'methods': methods,
+    return Response({'from': start, 'to': end, 'stats': totals(start, end), 'methods': methods, 'gst_register': gst_register(start, end),
         'top_products': list(top), 'staff': list(staff), 'customers': list(customers),
         'low_stock': list(low), 'outstanding': outstanding,
         'total_outstanding': str(sum((Decimal(c['outstanding']) for c in outstanding), ZERO)),
@@ -102,4 +102,43 @@ def export(request):
             inv.grand_total, inv.payment_method, inv.created_by.username, inv.status]])
     response = HttpResponse('\ufeff' + stream.getvalue(), content_type='text/csv; charset=utf-8')
     response['Content-Disposition'] = f'attachment; filename="sales-{start}-{end}.csv"'
+    return response
+
+
+def gst_register(start, end):
+    rows = []
+    for inv in Invoice.objects.filter(created_at__date__range=(start,end)).order_by('id'):
+        if inv.status == 'VOID' and not hasattr(inv, 'credit_note'):
+            continue  # Legacy voids predate credit-note documents.
+        rows.append(gst_row(inv, inv.number, timezone.localdate(inv.created_at), 1))
+    for note in CreditNote.objects.filter(created_at__date__range=(start,end)).select_related('invoice'):
+        row = gst_row(note.invoice, note.number, timezone.localdate(note.created_at), -1)
+        row['original_invoice'] = note.invoice.number
+        rows.append(row)
+    for note in SaleReturn.objects.filter(created_at__date__range=(start,end)).select_related('invoice'):
+        row=gst_row(note.invoice,note.number,timezone.localdate(note.created_at),-1)
+        row.update({k:str(-Decimal(v)) for k,v in note.tax_parts.items() if k!='cost'})
+        row['original_invoice']=note.invoice.number
+        rows.append(row)
+    return rows
+
+def gst_row(inv, number, date, sign):
+    return {'number': number, 'date': str(date), 'original_invoice': '', 'place_of_supply': inv.place_of_supply,
+            'customer_gstin': inv.customer_snapshot.get('gstin',''),
+            'taxable': str(sign*(inv.subtotal-inv.discount)),
+            **{k: str(sign*getattr(inv,k)) for k in ['cgst','sgst','utgst','igst','gst_amount','grand_total']}}
+
+@api_view(['GET'])
+def gst_export(request):
+    require(request.user, 'reports.view')
+    start,end = dates(request)
+    stream=io.StringIO()
+    fields=['number','date','original_invoice','place_of_supply','customer_gstin','taxable','cgst','sgst','utgst','igst','gst_amount','grand_total']
+    writer=csv.writer(stream)
+    writer.writerow(fields)
+    numeric={'taxable','cgst','sgst','utgst','igst','gst_amount','grand_total'}
+    for row in gst_register(start,end):
+        writer.writerow([row[k] if k in numeric else safe_csv(row[k]) for k in fields])
+    response=HttpResponse('\ufeff'+stream.getvalue(), content_type='text/csv; charset=utf-8')
+    response['Content-Disposition']='attachment; filename="gst-register.csv"'
     return response
