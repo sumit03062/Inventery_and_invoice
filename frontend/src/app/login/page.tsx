@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import {useState,useEffect} from 'react';
 import {useRouter} from 'next/navigation';
 import {useAuth} from '@/hooks/useAuth';
@@ -13,5 +14,5 @@ export default function Login(){
  <form onSubmit={async e=>{e.preventDefault();setBusy(true);setError('');const data=Object.fromEntries(new FormData(e.currentTarget));try{if(auth.needsSetup)await auth.setup(data);else await auth.login(String(data.username),String(data.password));}catch(e){setError(e instanceof Error?e.message:'Unable to sign in');}finally{setBusy(false);}}}>
  {auth.needsSetup&&<><Field label="Shop name"><input name="shop_name" required maxLength={150} autoComplete="organization"/></Field><Field label="Owner name"><input name="owner_name" required maxLength={150} autoComplete="name"/></Field></>}
  <Field label="Username"><input name="username" required autoComplete="username" maxLength={150}/></Field><Field label="Password" hint={auth.needsSetup?'At least 8 characters. Avoid common or numeric-only passwords.':undefined}><input name="password" type="password" required minLength={auth.needsSetup?8:1} autoComplete={auth.needsSetup?'new-password':'current-password'}/></Field>
- <button className="btn primary wide" disabled={busy||!!auth.error}>{busy?'Please wait…':auth.needsSetup?'Create shop':'Sign in'}<ArrowRight size={17}/></button></form><small className="muted">Staff accounts are created by the shop owner.</small></section></main>;
+ <button className="btn primary wide" disabled={busy||!!auth.error}>{busy?'Please wait…':auth.needsSetup?'Create shop':'Sign in'}<ArrowRight size={17}/></button></form>{!auth.needsSetup&&<p><Link href="/reset-password" className="table-link">Forgot password?</Link></p>}<small className="muted">Staff accounts are created by the shop owner.</small></section></main>;
 }

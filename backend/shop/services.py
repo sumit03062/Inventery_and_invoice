@@ -243,7 +243,7 @@ def create_invoice(user, data):
     shop.save(update_fields=['next_invoice_number'])
     for p, base, share, (line_tax, parts) in zip(products, bases, discounts, calculated):
         item = InvoiceItem.objects.create(invoice=invoice, product=p, name=p.name, sku=p.sku,
-            quantity=quantities[p.id], price=p.price, purchase_price=p.purchase_price,
+            quantity=quantities[p.id], price=p.price, purchase_price=p.purchase_price, warranty_days=p.warranty_days,
             hsn_code=p.hsn_code, unit=p.unit, price_includes_tax=p.price_includes_tax, taxable_value=base-share, **parts,
             gst_percent=p.gst_percent if shop.tax_enabled else ZERO,
             discount=share, tax=line_tax, total=base - share + line_tax)

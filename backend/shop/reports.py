@@ -30,11 +30,13 @@ def dates(request):
 def totals(start, end):
     invoices = Invoice.objects.filter(status='ACTIVE', created_at__date__range=(start, end))
     payments = Payment.objects.filter(transaction_date__date__range=(start, end))
-    sales = sum((i.grand_total for i in invoices), ZERO)
+    returned = list(SaleReturn.objects.filter(created_at__date__range=(start,end)))
+    credits = sum((x.total for x in returned), ZERO)
+    sales = sum((i.grand_total for i in invoices), ZERO) - credits
     collections = sum((p.amount if p.direction == 'RECEIPT' else -p.amount for p in payments), ZERO)
     initial_paid = Payment.objects.filter(invoice__in=invoices, direction='RECEIPT').aggregate(total=Sum('amount'))['total'] or ZERO
     return {'sales': str(sales), 'collections': str(collections),
-            'udhar': str(sales - initial_paid), 'gst': str(sum((i.gst_amount for i in invoices), ZERO)),
+            'udhar': str(sales + sum((x.refund for x in returned), ZERO) - initial_paid), 'gst': str(sum((i.gst_amount for i in invoices), ZERO)-sum((Decimal(x.tax_parts['gst_amount']) for x in returned),ZERO)),
             'discount': str(sum((i.discount for i in invoices), ZERO)), 'invoice_count': invoices.count()}
 
 
@@ -67,9 +69,30 @@ def reports(request):
         receipts = rows.filter(direction='RECEIPT').aggregate(total=Sum('amount'))['total'] or ZERO
         refunds = rows.filter(direction='REFUND').aggregate(total=Sum('amount'))['total'] or ZERO
         methods.append({'method': method, 'receipts': str(receipts), 'refunds': str(refunds), 'net': str(receipts - refunds)})
-    top = InvoiceItem.objects.filter(invoice__in=invoices).values('product_id', 'name', 'unit').annotate(quantity=Sum('quantity'), total=Sum('total')).order_by('-quantity')[:20]
-    staff = invoices.values('created_by__username').annotate(total=Sum('grand_total')).order_by('-total')
-    customers = invoices.values('customer_snapshot__name').annotate(total=Sum('grand_total')).order_by('-total')[:30]
+    product_totals = {}
+    staff_totals = {}
+    customer_totals = {}
+    for inv in invoices.select_related('created_by').prefetch_related('items'):
+        staff_totals[inv.created_by.username] = staff_totals.get(inv.created_by.username,ZERO) + inv.grand_total
+        name=inv.customer_snapshot.get('name','Walk-in customer')
+        customer_totals[name]=customer_totals.get(name,ZERO)+inv.grand_total
+        for item in inv.items.all():
+            row=product_totals.setdefault(item.product_id,{'name':item.name,'unit':item.unit,'quantity':ZERO,'total':ZERO})
+            row['quantity']+=item.quantity
+            row['total']+=item.total
+    for returned in SaleReturn.objects.filter(created_at__date__range=(start,end)).select_related('invoice__created_by').prefetch_related('items__item'):
+        actor=returned.invoice.created_by.username
+        name=returned.invoice.customer_snapshot.get('name','Walk-in customer')
+        staff_totals[actor]=staff_totals.get(actor,ZERO)-returned.total
+        customer_totals[name]=customer_totals.get(name,ZERO)-returned.total
+        for line in returned.items.all():
+            item=line.item
+            row=product_totals.setdefault(item.product_id,{'name':item.name,'unit':item.unit,'quantity':ZERO,'total':ZERO})
+            row['quantity']-=line.quantity
+            row['total']-=line.total
+    top=sorted(product_totals.values(),key=lambda x:x['quantity'],reverse=True)[:20]
+    staff=[{'created_by__username':name,'total':total} for name,total in sorted(staff_totals.items(),key=lambda x:x[1],reverse=True)]
+    customers=[{'customer_snapshot__name':name,'total':total} for name,total in sorted(customer_totals.items(),key=lambda x:x[1],reverse=True)[:30]]
     outstanding = CustomerSerializer(Customer.objects.filter(active=True), many=True).data
     low = Product.objects.filter(active=True, stock_quantity__lte=F('low_stock_threshold')).values('name', 'sku', 'unit', 'stock_quantity', 'low_stock_threshold')
     history = []

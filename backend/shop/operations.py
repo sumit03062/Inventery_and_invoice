@@ -325,7 +325,14 @@ def return_pdf(request,pk):
     from .documents import document,p,table
     require(request.user,'returns.create')
     row=get_object_or_404(SaleReturn,pk=pk)
-    return document([p(row.number,'Title'),p(f'Credit note for {row.invoice.number}'),p(str(timezone.localdate(row.created_at))),p(row.reason),
-        table([['Item','Quantity','Credit']]+[[x.item.name,str(x.quantity),str(x.total)] for x in row.items.select_related('item')],[280,80,120]),
+    shop=row.invoice.shop_snapshot
+    customer=row.invoice.customer_snapshot
+    return document([p(shop.get('name',''),'Title'),p(shop.get('address','')),p('GSTIN: '+shop.get('gstin','')),
+        p(row.number,'Heading1'),p(f'Credit note for {row.invoice.number} dated {timezone.localdate(row.invoice.created_at)}'),
+        p('Credit note date: '+str(timezone.localdate(row.created_at))),p('Customer: '+customer.get('name','')),
+        p(customer.get('address','')),p('Customer GSTIN: '+customer.get('gstin','')),
+        p('Place of supply: '+row.invoice.place_of_supply),p(row.reason),
+        table([['Item / HSN / unit','Quantity','Credit']]+[[f'{x.item.name}\n{x.item.hsn_code} / {x.item.unit}\n'+', '.join(x.serial_numbers),str(x.quantity),str(x.total)] for x in row.items.select_related('item')],[280,80,120]),
         p(f'Total credit INR {row.total}; refund recorded INR {row.refund}'),p('Refunds must be returned separately using the recorded method.'),
-        *[p(f'{k}: INR {v}') for k,v in row.tax_parts.items() if k not in ['cost','grand_total']]],row.number)
+        *[p(f'{k}: INR {v}') for k,v in row.tax_parts.items() if k not in ['cost','grand_total']],
+        p('Authorized signatory: __________________')],row.number)

@@ -7,7 +7,7 @@ import {useAuth} from '@/hooks/useAuth';
 import {useData} from '@/components/ui';
 import type {Shop} from '@/types';
 import toast from 'react-hot-toast';
-const links=[['/dashboard','Dashboard',LayoutDashboard,'reports.view'],['/billing','Billing',Receipt,'billing.create'],['/invoices','Invoices',FileText,''],['/products','Products',Package,''],['/customers','Customers',Users,''],['/ledger','Udhar Ledger',BookOpen,''],['/reports','Reports',BarChart3,'reports.view'],['/staff','Staff',UserCog,'staff.manage'],['/settings','Settings',Settings,'settings.manage']] as const;
+const links=[['/dashboard','Dashboard',LayoutDashboard,'reports.view'],['/billing','Billing',Receipt,'billing.create'],['/invoices','Invoices',FileText,''],['/products','Products',Package,''],['/customers','Customers',Users,''],['/ledger','Udhar Ledger',BookOpen,''],['/reports','Reports',BarChart3,'reports.view'],['/staff','Staff',UserCog,'staff.manage'],['/operations','Shop operations',Package,''],['/account','My account',UserCog,''],['/settings','Settings',Settings,'settings.manage']] as const;
 export default function Shell({children}:{children:React.ReactNode}){
  const {user,loading,logout,can,error}=useAuth();const pathname=usePathname();const router=useRouter();const [open,setOpen]=useState(false);
  const shop=useData<Shop>('/shop/');

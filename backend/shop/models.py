@@ -111,6 +111,7 @@ class Invoice(models.Model):
 
 
 class InvoiceItem(models.Model):
+    warranty_days = models.PositiveIntegerField(default=0)
     serial_numbers = models.JSONField(default=list)
     invoice = models.ForeignKey(Invoice, on_delete=models.PROTECT, related_name='items')
     product = models.ForeignKey(Product, on_delete=models.PROTECT)

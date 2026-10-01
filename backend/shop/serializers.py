@@ -152,7 +152,10 @@ class CustomerSerializer(serializers.ModelSerializer):
         return str(balance(obj))
 
     def get_total_purchases(self, obj):
-        return str(obj.invoices.filter(status='ACTIVE').aggregate(total=Sum('grand_total'))['total'] or ZERO)
+        from .models import SaleReturn
+        sales = obj.invoices.filter(status='ACTIVE').aggregate(total=Sum('grand_total'))['total'] or ZERO
+        credits = SaleReturn.objects.filter(invoice__customer=obj).aggregate(total=Sum('total'))['total'] or ZERO
+        return str(sales-credits)
 
     def get_overdue(self, obj):
         if balance(obj) <= 0:

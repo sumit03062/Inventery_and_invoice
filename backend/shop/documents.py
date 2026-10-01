@@ -94,6 +94,11 @@ def invoice_document(inv, credit_note=None, thermal=False):
     rows = [['Item', 'Total']] if thermal else [['Product / HSN / unit', 'Qty', 'Rate', 'Discount', 'GST %', 'Tax', 'Total']]
     for item in inv.items.all():
         label = f'{item.name}\n{item.sku} | HSN {item.hsn_code or "-"} | {item.unit}'
+        if item.serial_numbers:
+            label += '\nSerials: ' + ', '.join(item.serial_numbers)
+            if item.warranty_days:
+                from datetime import timedelta
+                label += '\nWarranty until: ' + str(timezone.localdate(inv.created_at)+timedelta(days=item.warranty_days))
         if item.price_includes_tax:
             label += '\nRate includes GST'
         if thermal:
@@ -108,6 +113,11 @@ def invoice_document(inv, credit_note=None, thermal=False):
         p(inv.notes), Spacer(1, 16), p(shop.get('invoice_footer', ''))]
     if not credit_note:
         elements += [p(f'Outstanding on this invoice: Rs. {invoice_due(inv)}')]
+        for payment in inv.payments.filter(direction='RECEIPT'):
+            elements += [p(f'{payment.method} received: Rs. {payment.amount}')]
+        for note in inv.returns.all():
+            elements += [p(f'Returned: {note.number}, Rs. {note.total}')]
+
     for component in ['cgst','sgst','utgst','igst']:
         if getattr(inv, component):
             elements += [p(f'{component.upper()}: Rs. {getattr(inv, component)}')]
